@@ -1,4 +1,4 @@
-all: build-ebpf build run
+all: build-ebpf build
 
 build-ebpf:
 	mkdir -p ebpf/bin
@@ -18,15 +18,14 @@ build-ebpf:
 		-O2 -emit-llvm \
 		ebpf/main.c \
 		-c -o - | llc -march=bpf -filetype=obj -o ebpf/bin/probe.o
-	go-bindata -pkg assets -prefix "ebpf/bin" -o "pkg/assets/probe.go" "ebpf/bin/probe.o"
+	go run github.com/shuLhan/go-bindata/cmd/go-bindata -pkg assets -prefix "ebpf/bin" -o "pkg/assets/probe.go" "ebpf/bin/probe.o"
 
 build:
 	mkdir -p bin/
 	go build -o bin/ ./...
 
 run:
-	#sudo ./bin/utrace --binary "/home/vagrant/go/src/github.com/DataDog/etc/playground/uprobe2/cmd/main" --pattern "(^syscall\..*|^main\..*)" --generate-graph --kernel-pattern "^vfs_open$$"
-	sudo ./bin/utrace --binary "/home/vagrant/go/src/github.com/DataDog/etc/playground/uprobe2/cmd/main" --generate-graph --kernel-pattern "^vfs_open$$"
+	sudo ./bin/utrace --generate-graph --kernel-pattern "^vfs_open$$" --latency
 
 install:
 	sudo cp ./bin/utrace /usr/bin/

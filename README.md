@@ -98,7 +98,7 @@ INFO[2021-02-03T00:10:43Z] Graph generated: /tmp/utrace-dump-120828521
 #### Trace all overlay operations in the kernel
 
 ```shell script
-# ~ sudo utrace --kernel-pattern "^ovl_" --generate-graph --latency
+# ~ sudo utrace --kernel-pattern "^ovl_" --generate-graph
 ```
 
 ![utrace-ovl.svg](documentation/utrace-ovl.svg)
