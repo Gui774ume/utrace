@@ -1,0 +1,6 @@
+.DS_Store
+.idea/
+bin/
+vendor/
+graphs/
+TODO
