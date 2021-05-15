@@ -285,8 +285,8 @@ func dumpReportWithLatency(report utrace.Report) {
 }
 
 const (
-	stackTracesDumpHeader = "total_hits;symbol_name;symbol_type;offset;avg_latency;\n"
-	stackTracesDumpNodeFormat = "%s;%s;%d;%s;"
+	stackTracesDumpHeader = "total_hits;symbol_name;symbol_type;symbol_addr;offset;avg_latency;\n"
+	stackTracesDumpNodeFormat = "%s;%s;0x%x;%d;%s;"
 )
 
 func dumpStackTraces(report utrace.Report) error {
@@ -319,7 +319,7 @@ func dumpStackTraces(report utrace.Report) error {
 					fmt.Printf("\t\t\thit(s): %d avg_latency: %s\n", fun.Count, fun.AverageLatency)
 					latency = fun.AverageLatency
 				}
-				if _, err = d.WriteString(fmt.Sprintf(stackTracesDumpNodeFormat, n.Symbol.Name, n.Type, n.Offset, latency)); err != nil {
+				if _, err = d.WriteString(fmt.Sprintf(stackTracesDumpNodeFormat, n.Symbol.Name, n.Type, n.Symbol.Value, n.Offset, latency)); err != nil {
 					return err
 				}
 			}
@@ -333,7 +333,7 @@ func dumpStackTraces(report utrace.Report) error {
 					fmt.Printf("\t\t\thit(s): %d avg_latency: %s\n", fun.Count, fun.AverageLatency)
 					latency = fun.AverageLatency
 				}
-				if _, err = d.WriteString(fmt.Sprintf(stackTracesDumpNodeFormat, n.Symbol.Name, n.Type, n.Offset, latency)); err != nil {
+				if _, err = d.WriteString(fmt.Sprintf(stackTracesDumpNodeFormat, n.Symbol.Name, n.Type, n.Symbol.Value, n.Offset, latency)); err != nil {
 					return err
 				}
 			}
