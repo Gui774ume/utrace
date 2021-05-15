@@ -20,6 +20,7 @@ import (
 	"io/ioutil"
 	"os"
 	"text/template"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/blake2b"
@@ -34,17 +35,20 @@ func dump(report utrace.Report, options CLIOptions) {
 		dumpReport(report)
 	}
 	if options.UTraceOptions.StackTraces {
-		dumpStackTraces(report)
+		if err := dumpStackTraces(report); err != nil {
+			logrus.Warnf("couldn't generate stack trace dump: %s", err)
+		}
 	}
-	fmt.Printf("\n%d user space stack traces collected (%d lost)\n", report.GetStackTraceCount().User, report.GetStackTraceCount().LostUser)
-	fmt.Printf("%d kernel space stack traces collected (%d lost)\n", report.GetStackTraceCount().Kernel, report.GetStackTraceCount().LostKernel)
-	fmt.Printf("Tracing lasted for %s\n", report.GetDuration())
+	logrus.Infof("%d user space stack traces collected (%d lost)", report.GetStackTraceCount().User, report.GetStackTraceCount().LostUser)
+	logrus.Infof("%d kernel space stack traces collected (%d lost)", report.GetStackTraceCount().Kernel, report.GetStackTraceCount().LostKernel)
+	logrus.Infof("Tracing lasted for %s", report.GetDuration())
 
 	if options.GenerateGraph {
 		if err := generateDotGraph(report, options); err != nil {
 			logrus.Warnf("couldn't generate graph: %s", err)
 		}
 	}
+
 }
 
 func generateNodeID(node utrace.StackTraceNode) string {
@@ -248,7 +252,7 @@ func generateDotGraph(report utrace.Report, options CLIOptions) error {
 	data.Title += fmt.Sprintf("\n[user: %d traced function(s), %d stack trace(s), %d lost]", usrFuncCount, report.GetStackTraceCount().User, report.GetStackTraceCount().LostUser)
 	data.Title += fmt.Sprintf("\n[duration: %s]", report.GetDuration())
 
-	f, err := ioutil.TempFile("/tmp", "utrace-dump-")
+	f, err := ioutil.TempFile("/tmp", "utrace-graph-")
 	if err != nil {
 		return err
 	}
@@ -262,7 +266,7 @@ func generateDotGraph(report utrace.Report, options CLIOptions) error {
 	if err := t.Execute(f, data); err != nil {
 		return err
 	}
-	logrus.Infof("Graph generated: %s\n", f.Name())
+	logrus.Infof("Graph generated: %s", f.Name())
 	return nil
 }
 
@@ -280,29 +284,64 @@ func dumpReportWithLatency(report utrace.Report) {
 	}
 }
 
-func dumpStackTraces(report utrace.Report) {
+const (
+	stackTracesDumpHeader = "total_hits;symbol_name;symbol_type;offset;avg_latency;\n"
+	stackTracesDumpNodeFormat = "%s;%s;%d;%s;"
+)
+
+func dumpStackTraces(report utrace.Report) error {
+	d, err := ioutil.TempFile("/tmp", "utrace-dump-")
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if _, err = d.WriteString(stackTracesDumpHeader); err != nil {
+		return err
+	}
+
+	var latency time.Duration
 	for _, f := range report.GetFunctionsByHits() {
 		if len(f.GetStackTracesByHits()) == 0 {
 			continue
 		}
 		fmt.Printf("\nDumping stack traces for symbol %v:\n", f.Symbol.Name)
+
 		for stackID, trace := range f.GetStackTracesByHits() {
 			fmt.Printf("\t* Stack %d [%d hit(s)]\n", stackID, trace.Count)
-			for _, node := range trace.UserStacktrace {
-				fmt.Printf("\t\t- %s (offset: 0x%x)\n", node.Symbol.Name, node.Offset)
-				if f := report.GetFunc(node.FuncID, utrace.User); f.Symbol.Name != utrace.UserSymbolNotFound.Name {
-					fmt.Printf("\t\t\thit(s): %d avg_latency: %s\n", f.Count, f.AverageLatency)
+			if _, err = d.WriteString(fmt.Sprintf("%d;", trace.Count)); err != nil {
+				return err
+			}
+
+			for _, n := range trace.UserStacktrace {
+				latency = 0
+				fmt.Printf("\t\t- %s (offset: 0x%x)\n", n.Symbol.Name, n.Offset)
+				if fun := report.GetFunc(n.FuncID, utrace.User); fun.Symbol.Name != utrace.UserSymbolNotFound.Name {
+					fmt.Printf("\t\t\thit(s): %d avg_latency: %s\n", fun.Count, fun.AverageLatency)
+					latency = fun.AverageLatency
+				}
+				if _, err = d.WriteString(fmt.Sprintf(stackTracesDumpNodeFormat, n.Symbol.Name, n.Type, n.Offset, latency)); err != nil {
+					return err
 				}
 			}
 			if len(trace.KernelStackTrace) > 0 {
 				fmt.Print("\t\t--------------------------\n")
 			}
-			for _, node := range trace.KernelStackTrace {
-				fmt.Printf("\t\t- %s (offset: 0x%x)\n", node.Symbol.Name, node.Offset)
-				if f := report.GetFunc(node.FuncID, utrace.Kernel); f.Symbol.Name != utrace.KernelSymbolNotFound.Name {
-					fmt.Printf("\t\t\thit(s): %d avg_latency: %s\n", f.Count, f.AverageLatency)
+			for _, n := range trace.KernelStackTrace {
+				latency = 0
+				fmt.Printf("\t\t- %s (offset: 0x%x)\n", n.Symbol.Name, n.Offset)
+				if fun := report.GetFunc(n.FuncID, utrace.Kernel); fun.Symbol.Name != utrace.KernelSymbolNotFound.Name {
+					fmt.Printf("\t\t\thit(s): %d avg_latency: %s\n", fun.Count, fun.AverageLatency)
+					latency = fun.AverageLatency
 				}
+				if _, err = d.WriteString(fmt.Sprintf(stackTracesDumpNodeFormat, n.Symbol.Name, n.Type, n.Offset, latency)); err != nil {
+					return err
+				}
+			}
+			if _, err = d.WriteString("\n"); err != nil {
+				return err
 			}
 		}
 	}
+	logrus.Infof("Stack traces dump generated: %s", d.Name())
+	return nil
 }
