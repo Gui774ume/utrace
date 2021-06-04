@@ -22,7 +22,7 @@ build-ebpf:
 
 build:
 	mkdir -p bin/
-	go build -o bin/ ./...
+	go build -o bin/ ./cmd/...
 
 run:
 	sudo ./bin/utrace --generate-graph --kernel-pattern "^vfs_open$$" --latency
