@@ -19,8 +19,8 @@ import (
 	"bytes"
 	"debug/elf"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"io/ioutil"
+	"math"
 	"os"
 	"runtime"
 	"strconv"
@@ -30,8 +30,11 @@ import (
 
 	"github.com/DataDog/ebpf"
 	"github.com/DataDog/ebpf/manager"
-	"github.com/Gui774ume/utrace/pkg/assets"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
+
+	"github.com/Gui774ume/utrace/pkg/assets"
 )
 
 // UTrace is the main UTrace structure
@@ -174,6 +177,10 @@ func (u *UTrace) setupDefaultManager() {
 			Name:  "send_stack_trace",
 			Value: uint64(1),
 		})
+	}
+	u.managerOptions.RLimit = &unix.Rlimit{
+		Cur: math.MaxUint64,
+		Max: math.MaxUint64,
 	}
 }
 
