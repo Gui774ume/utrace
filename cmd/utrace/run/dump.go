@@ -1,5 +1,5 @@
 /*
-Copyright © 2020 GUILLAUME FOURNIER
+Copyright © 2021 GUILLAUME FOURNIER
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package run
 
 import (
@@ -285,7 +286,7 @@ func dumpReportWithLatency(report utrace.Report) {
 }
 
 const (
-	stackTracesDumpHeader = "total_hits;symbol_name;symbol_type;symbol_addr;offset;avg_latency;\n"
+	stackTracesDumpHeader     = "total_hits;symbol_name;symbol_type;symbol_addr;offset;avg_latency;\n"
 	stackTracesDumpNodeFormat = "%s;%s;0x%x;%d;%s;"
 )
 
