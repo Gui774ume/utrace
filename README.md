@@ -24,7 +24,7 @@ UTrace is a tracing utility that leverages eBPF to trace both user space and ker
 # ~ make build
 ```
 
-3) To install UTrace (copy to /usr/bin/fsprobe) run:
+3) To install UTrace (copy to /usr/bin/uprobe) run:
 ```shell script
 # ~ make install
 ```
