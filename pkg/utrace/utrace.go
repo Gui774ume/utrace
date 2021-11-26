@@ -45,6 +45,7 @@ type UTrace struct {
 	stackTraces    *ebpf.Map
 	binaryPath     *ebpf.Map
 	lostCount      *ebpf.Map
+	tracedPIDs     *ebpf.Map
 	manager        *manager.Manager
 	managerOptions manager.Options
 	startTime      time.Time
@@ -210,6 +211,12 @@ func (u *UTrace) selectMaps() error {
 		_ = u.manager.Stop(manager.CleanAll)
 		return errors.Wrap(err, "couldn't find maps/lost_traces")
 	}
+
+	u.tracedPIDs, _, err = u.manager.GetMap("traced_pids")
+	if err != nil {
+		_ = u.manager.Stop(manager.CleanAll)
+		return errors.Wrap(err, "couldn't find maps/traced_pids")
+	}
 	return nil
 }
 
@@ -225,14 +232,14 @@ func (u *UTrace) start() error {
 
 	// generate uprobes if a binary file
 	if len(u.options.Binary) > 0 {
-		if err := u.generateUProbes(); err != nil {
+		if err = u.generateUProbes(); err != nil {
 			return errors.Wrap(err, "couldn't generate uprobes")
 		}
 	}
 
 	// setup kprobes if a kernel function pattern was provided
 	if u.options.KernelFuncPattern != nil {
-		if err := u.generateKProbes(); err != nil {
+		if err = u.generateKProbes(); err != nil {
 			return errors.Wrap(err, "couldn't generate kprobes")
 		}
 	}
@@ -248,25 +255,33 @@ func (u *UTrace) start() error {
 	}
 
 	// initialize the manager
-	if err := u.manager.InitWithOptions(bytes.NewReader(buf), u.managerOptions); err != nil {
+	if err = u.manager.InitWithOptions(bytes.NewReader(buf), u.managerOptions); err != nil {
 		return errors.Wrap(err, "couldn't init manager")
 	}
 
 	// select kernel space maps
-	if err := u.selectMaps(); err != nil {
+	if err = u.selectMaps(); err != nil {
 		return err
 	}
 
 	// insert binary path in kernel space
 	pathB := [PathMax]byte{}
 	copy(pathB[:], u.options.Binary)
-	if err := u.binaryPath.Put(pathB, uint32(1)); err != nil {
+	if err = u.binaryPath.Put(pathB, uint32(1)); err != nil {
 		_ = u.manager.Stop(manager.CleanAll)
 		return errors.Wrap(err, "failed to insert binary path in kernel")
 	}
 
+	// insert pid
+	if u.options.PIDFilter > 0 {
+		if err = u.tracedPIDs.Put(uint32(u.options.PIDFilter), uint32(1)); err != nil {
+			_ = u.manager.Stop(manager.CleanAll)
+			return errors.Wrap(err, "failed to insert PID filter")
+		}
+	}
+
 	// start the manager
-	if err := u.manager.Start(); err != nil {
+	if err = u.manager.Start(); err != nil {
 		return errors.Wrap(err, "couldn't start manager")
 	}
 
@@ -445,7 +460,7 @@ func (u *UTrace) generateKProbes() error {
 				probe.GetIdentificationPair(),
 			},
 		})
-		if len(u.options.Binary) > 0 {
+		if len(u.options.Binary) > 0 || u.options.PIDFilter > 0 {
 			constantEditors = append(constantEditors, manager.ConstantEditor{
 				Name:  "filter_user_binary",
 				Value: uint64(1),
