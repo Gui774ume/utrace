@@ -67,4 +67,9 @@ func init() {
 		"g",
 		false,
 		`when set, utrace will generate a .dot graph with the collected statistics`)
+	Utrace.Flags().IntVar(
+		&options.UTraceOptions.PIDFilter,
+		"pid",
+		0,
+		`when set, utrace will add the provided pid to the list of traced pids. Leave empty to disable filtering.`)
 }

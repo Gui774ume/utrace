@@ -65,6 +65,7 @@ type Options struct {
 	KernelFuncPattern *regexp.Regexp
 	Latency           bool
 	StackTraces       bool
+	PIDFilter         int
 }
 
 func (o Options) check() error {
