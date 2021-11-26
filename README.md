@@ -46,6 +46,7 @@ Flags:
   -t, --latency                 when set, utrace will use uprobes to compute functions latency
   -l, --log-level string        log level, options: panic, fatal, error, warn, info, debug or trace (default "info")
   -p, --pattern regexp          function(s) pattern to trace (default *)
+      --pid int                 when set, utrace will add the provided pid to the list of traced pids. Leave empty to disable filtering.
   -s, --stack-traces            when set, utrace will use uprobes to collect functions stack traces
 ```
 
