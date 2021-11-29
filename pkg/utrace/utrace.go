@@ -230,7 +230,11 @@ func (u *UTrace) start() error {
 	// setup a default manager
 	u.setupDefaultManager()
 
-	// generate uprobes if a binary file
+	if u.options.PIDFilter > 0 && len(u.options.Binary) == 0 {
+		u.options.Binary = fmt.Sprintf("/proc/%d/exe", u.options.PIDFilter)
+	}
+
+	// generate uprobes if a binary file is provided
 	if len(u.options.Binary) > 0 {
 		if err = u.generateUProbes(); err != nil {
 			return errors.Wrap(err, "couldn't generate uprobes")
@@ -488,7 +492,7 @@ func (u *UTrace) generateKProbes() error {
 					retProbe.GetIdentificationPair(),
 				},
 			})
-			if len(u.options.Binary) > 0 {
+			if len(u.options.Binary) > 0 || u.options.PIDFilter > 0 {
 				constantEditors = append(constantEditors, manager.ConstantEditor{
 					Name:  "filter_user_binary",
 					Value: uint64(1),
