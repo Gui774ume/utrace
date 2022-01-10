@@ -29,8 +29,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/DataDog/ebpf"
-	"github.com/DataDog/ebpf/manager"
+	manager "github.com/DataDog/ebpf-manager"
+	"github.com/cilium/ebpf"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -148,8 +148,11 @@ func (u *UTrace) nextFuncID() FuncID {
 
 func (u *UTrace) setupDefaultManager() {
 	execTracepoint := &manager.Probe{
-		UID:     "utrace",
-		Section: "tracepoint/sched/sched_process_exec",
+		ProbeIdentificationPair: manager.ProbeIdentificationPair{
+			UID:          "utrace",
+			EBPFSection:  "tracepoint/sched/sched_process_exec",
+			EBPFFuncName: "tracepoint_sched_sched_process_exec",
+		},
 	}
 	u.manager = &manager.Manager{
 		Probes: []*manager.Probe{execTracepoint},
@@ -169,7 +172,7 @@ func (u *UTrace) setupDefaultManager() {
 	u.managerOptions.ActivatedProbes = append(u.managerOptions.ActivatedProbes, &manager.OneOf{
 		Selectors: []manager.ProbesSelector{
 			&manager.ProbeSelector{
-				ProbeIdentificationPair: execTracepoint.GetIdentificationPair(),
+				ProbeIdentificationPair: execTracepoint.ProbeIdentificationPair,
 			},
 		},
 	})
@@ -331,8 +334,11 @@ func (u *UTrace) generateUProbes() error {
 		escapedName := sanitizeFuncName(sym.Name)
 		funcID := u.nextFuncID()
 		probe := &manager.Probe{
-			UID:           escapedName,
-			Section:       "uprobe/utrace",
+			ProbeIdentificationPair: manager.ProbeIdentificationPair{
+				UID:          escapedName,
+				EBPFSection:  "uprobe/utrace",
+				EBPFFuncName: "uprobe_utrace",
+			},
 			CopyProgram:   true,
 			BinaryPath:    u.options.Binary,
 			UprobeOffset:  sym.Value,
@@ -340,20 +346,23 @@ func (u *UTrace) generateUProbes() error {
 		}
 		u.manager.Probes = append(u.manager.Probes, probe)
 		oneOfSelector.Selectors = append(oneOfSelector.Selectors, &manager.ProbeSelector{
-			ProbeIdentificationPair: probe.GetIdentificationPair(),
+			ProbeIdentificationPair: probe.ProbeIdentificationPair,
 		})
 		constantEditors = append(constantEditors, manager.ConstantEditor{
 			Name:  "func_id",
 			Value: uint64(funcID),
 			ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
-				probe.GetIdentificationPair(),
+				probe.ProbeIdentificationPair,
 			},
 		})
 
 		if u.options.Latency {
 			retProbe := &manager.Probe{
-				UID:           escapedName,
-				Section:       "uretprobe/utrace",
+				ProbeIdentificationPair: manager.ProbeIdentificationPair{
+					UID:          escapedName,
+					EBPFSection:  "uretprobe/utrace",
+					EBPFFuncName: "uretprobe_utrace",
+				},
 				CopyProgram:   true,
 				BinaryPath:    u.options.Binary,
 				UprobeOffset:  sym.Value,
@@ -361,13 +370,13 @@ func (u *UTrace) generateUProbes() error {
 			}
 			u.manager.Probes = append(u.manager.Probes, retProbe)
 			oneOfSelector.Selectors = append(oneOfSelector.Selectors, &manager.ProbeSelector{
-				ProbeIdentificationPair: retProbe.GetIdentificationPair(),
+				ProbeIdentificationPair: retProbe.ProbeIdentificationPair,
 			})
 			constantEditors = append(constantEditors, manager.ConstantEditor{
 				Name:  "func_id",
 				Value: uint64(funcID),
 				ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
-					retProbe.GetIdentificationPair(),
+					retProbe.ProbeIdentificationPair,
 				},
 			})
 		}
@@ -448,20 +457,23 @@ func (u *UTrace) generateKProbes() error {
 		escapedName := sanitizeFuncName(sym.Name)
 		funcID := u.nextFuncID()
 		probe := &manager.Probe{
-			UID:           escapedName,
-			Section:       "kprobe/utrace",
+			ProbeIdentificationPair: manager.ProbeIdentificationPair{
+				UID:          escapedName,
+				EBPFSection:  "kprobe/utrace",
+				EBPFFuncName: "kprobe_utrace",
+			},
 			CopyProgram:   true,
 			MatchFuncName: fmt.Sprintf(`^%s$`, escapedName),
 		}
 		u.manager.Probes = append(u.manager.Probes, probe)
 		oneOfSelector.Selectors = append(oneOfSelector.Selectors, &manager.ProbeSelector{
-			ProbeIdentificationPair: probe.GetIdentificationPair(),
+			ProbeIdentificationPair: probe.ProbeIdentificationPair,
 		})
 		constantEditors = append(constantEditors, manager.ConstantEditor{
 			Name:  "func_id",
 			Value: uint64(funcID),
 			ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
-				probe.GetIdentificationPair(),
+				probe.ProbeIdentificationPair,
 			},
 		})
 		if len(u.options.Binary) > 0 || u.options.PIDFilter > 0 {
@@ -469,27 +481,30 @@ func (u *UTrace) generateKProbes() error {
 				Name:  "filter_user_binary",
 				Value: uint64(1),
 				ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
-					probe.GetIdentificationPair(),
+					probe.ProbeIdentificationPair,
 				},
 			})
 		}
 
 		if u.options.Latency {
 			retProbe := &manager.Probe{
-				UID:           escapedName,
-				Section:       "kretprobe/utrace",
+				ProbeIdentificationPair: manager.ProbeIdentificationPair{
+					UID:          escapedName,
+					EBPFSection:  "kretprobe/utrace",
+					EBPFFuncName: "kretprobe_utrace",
+				},
 				CopyProgram:   true,
 				MatchFuncName: fmt.Sprintf(`^%s$`, escapedName),
 			}
 			u.manager.Probes = append(u.manager.Probes, retProbe)
 			oneOfSelector.Selectors = append(oneOfSelector.Selectors, &manager.ProbeSelector{
-				ProbeIdentificationPair: retProbe.GetIdentificationPair(),
+				ProbeIdentificationPair: retProbe.ProbeIdentificationPair,
 			})
 			constantEditors = append(constantEditors, manager.ConstantEditor{
 				Name:  "func_id",
 				Value: uint64(funcID),
 				ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
-					retProbe.GetIdentificationPair(),
+					retProbe.ProbeIdentificationPair,
 				},
 			})
 			if len(u.options.Binary) > 0 || u.options.PIDFilter > 0 {
@@ -497,7 +512,7 @@ func (u *UTrace) generateKProbes() error {
 					Name:  "filter_user_binary",
 					Value: uint64(1),
 					ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
-						retProbe.GetIdentificationPair(),
+						retProbe.ProbeIdentificationPair,
 					},
 				})
 			}

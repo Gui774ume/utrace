@@ -21,7 +21,7 @@ struct sched_process_exec_args
 };
 
 SEC("tracepoint/sched/sched_process_exec")
-int tracepoint__sched__sched_process_exec(struct sched_process_exec_args *ctx)
+int tracepoint_sched_sched_process_exec(struct sched_process_exec_args *ctx)
 {
     unsigned short __offset = ctx->data_loc_filename & 0xFFFF;
     char *filename = (char *)ctx + __offset;
