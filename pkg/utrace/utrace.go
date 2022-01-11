@@ -355,6 +355,16 @@ func (u *UTrace) generateUProbes() error {
 				probe.ProbeIdentificationPair,
 			},
 		})
+		if len(u.options.Binary) > 0 || u.options.PIDFilter > 0 {
+			probe.PerfEventPID = u.options.PIDFilter
+			constantEditors = append(constantEditors, manager.ConstantEditor{
+				Name:  "filter_user_binary",
+				Value: uint64(1),
+				ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
+					probe.ProbeIdentificationPair,
+				},
+			})
+		}
 
 		if u.options.Latency {
 			retProbe := &manager.Probe{
@@ -379,6 +389,16 @@ func (u *UTrace) generateUProbes() error {
 					retProbe.ProbeIdentificationPair,
 				},
 			})
+			if len(u.options.Binary) > 0 || u.options.PIDFilter > 0 {
+				retProbe.PerfEventPID = u.options.PIDFilter
+				constantEditors = append(constantEditors, manager.ConstantEditor{
+					Name:  "filter_user_binary",
+					Value: uint64(1),
+					ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
+						retProbe.ProbeIdentificationPair,
+					},
+				})
+			}
 		}
 
 		u.matchingFuncCache[funcID] = sym

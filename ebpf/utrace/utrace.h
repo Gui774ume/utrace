@@ -11,6 +11,20 @@
 SEC("uprobe/utrace")
 int uprobe_utrace(void *ctx)
 {
+    u64 now = bpf_ktime_get_ns();
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+
+    // check if a filter should be applied on the process that made the call
+    u32 filter_user_binary = load_filter_user_binary();
+    if (filter_user_binary) {
+        // check if this pid is traced
+        u32 *traced = bpf_map_lookup_elem(&traced_pids, &pid);
+        if (traced == NULL) {
+            return 0;
+        }
+    }
+
     // hits counter
     u32 func_id = load_func_id();
     struct counter_t *counter = bpf_map_lookup_elem(&counters, &func_id);
@@ -25,8 +39,7 @@ int uprobe_utrace(void *ctx)
         .func_id = func_id,
         .pid = bpf_get_current_pid_tgid(),
     };
-    u64 ts = bpf_ktime_get_ns();
-    bpf_map_update_elem(&start_ts, &key, &ts, BPF_ANY);
+    bpf_map_update_elem(&start_ts, &key, &now, BPF_ANY);
 
     // fetch stack trace
     u32 send_stack_trace = load_send_stack_trace();
@@ -53,6 +66,19 @@ SEC("uretprobe/utrace")
 int uretprobe_utrace(void *ctx)
 {
     u64 now = bpf_ktime_get_ns();
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+
+    // check if a filter should be applied on the process that made the call
+    u32 filter_user_binary = load_filter_user_binary();
+    if (filter_user_binary) {
+        // check if this pid is traced
+        u32 *traced = bpf_map_lookup_elem(&traced_pids, &pid);
+        if (traced == NULL) {
+            return 0;
+        }
+    }
+
     // hits counter
     u32 func_id = load_func_id();
     struct counter_t *counter = bpf_map_lookup_elem(&counters, &func_id);
