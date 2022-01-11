@@ -13,8 +13,8 @@ cloud.google.com/go/storage v1.0.0/go.mod h1:IhtSnM/ZTZV8YYJWCY8RULGVqBDmpoyjwiy
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
-github.com/DataDog/ebpf-manager v0.0.0-20220106215052-9189b77594bb h1:nUsDJ5s9zoxwL1RpsxrcTQOop4oa9FU8IDGYVDEgaIY=
-github.com/DataDog/ebpf-manager v0.0.0-20220106215052-9189b77594bb/go.mod h1:q6FEcnn+mlqeRyd+nNN/xuoHfVKVsZav5k3xEIQxkpI=
+github.com/DataDog/ebpf-manager v0.0.0-20220111092842-0c445a76d299 h1:KIbjlZP//7FgPR1x/mmUnJpwVXaHkOSPXXC3ws21Rd8=
+github.com/DataDog/ebpf-manager v0.0.0-20220111092842-0c445a76d299/go.mod h1:q6FEcnn+mlqeRyd+nNN/xuoHfVKVsZav5k3xEIQxkpI=
 github.com/DataDog/gopsutil v0.0.0-20200624212600-1b53412ef321 h1:OPAXA+r6yznoxWR5jQ2iTh5CvzIMrdw8AU0uFN2RwEw=
 github.com/DataDog/gopsutil v0.0.0-20200624212600-1b53412ef321/go.mod h1:tGQp6XG4XpOyy67WG/YWXVxzOY6LejK35e8KcQhtRIQ=
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
