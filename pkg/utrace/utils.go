@@ -17,8 +17,14 @@ limitations under the License.
 package utrace
 
 import (
+	"math/rand"
 	"strings"
+	"time"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 func sanitizeFuncName(name string) string {
 	escapedName := strings.ReplaceAll(name, "*", `\*`)
@@ -27,4 +33,22 @@ func sanitizeFuncName(name string) string {
 	escapedName = strings.ReplaceAll(escapedName, "[", `\[`)
 	escapedName = strings.ReplaceAll(escapedName, "]", `\]`)
 	return escapedName
+}
+
+var (
+	letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+)
+
+func randomStringFromSliceWithLen(runes []rune, n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letterRunes[rand.Intn(len(runes))]
+	}
+	return string(b)
+}
+
+// RandomStringWithLen returns a random string of specified length containing
+// upper- and lowercase runes.
+func RandomStringWithLen(n int) string {
+	return randomStringFromSliceWithLen(letterRunes, n)
 }

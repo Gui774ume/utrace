@@ -29,32 +29,59 @@ import (
 	"github.com/Gui774ume/utrace/pkg/utrace"
 )
 
-func dump(report utrace.Report, options CLIOptions) {
+func dump(report utrace.Report, options CLIOptions, tracer *utrace.UTrace) {
 	if options.UTraceOptions.Latency {
-		dumpReportWithLatency(report)
+		dumpReportWithLatency(report, tracer)
 	} else {
-		dumpReport(report)
+		dumpReport(report, tracer)
 	}
-	if options.UTraceOptions.StackTraces {
-		if err := dumpStackTraces(report); err != nil {
-			logrus.Warnf("couldn't generate stack trace dump: %s", err)
+	var printLater []string
+	for cookie, funcs := range report.GetFunctionsByHits() {
+		binary := tracer.TracedBinaries[cookie]
+
+		if options.UTraceOptions.StackTraces {
+			if binary == nil {
+				fmt.Printf("\n* Dumping kernel stack traces:\n")
+			} else {
+				fmt.Printf("\n* Dumping stack traces for %s:\n", binaryTitle(binary))
+			}
+			outputFile, err := dumpStackTraces(report, funcs)
+			if err != nil {
+				logrus.Warnf("couldn't generate stack trace dump for %s: %s", binaryTitle(binary), err)
+			} else {
+				if binary != nil {
+					printLater = append(printLater, fmt.Sprintf("User space stack traces dump for %s: %s", binaryTitle(binary), outputFile))
+				} else {
+					printLater = append(printLater, fmt.Sprintf("Kernel stack traces dump: %s", outputFile))
+				}
+			}
+		}
+
+		if options.GenerateGraph {
+			outputFile, err := generateDotGraph(report, funcs, tracer.TracedBinaries[cookie])
+			if err != nil {
+				logrus.Warnf("couldn't generate graph: %s", err)
+			} else {
+				if binary == nil {
+					printLater = append(printLater, fmt.Sprintf("Kernel space graph: %s", outputFile))
+				} else {
+					printLater = append(printLater, fmt.Sprintf("Userspace graph for %s: %s", binaryTitle(binary), outputFile))
+				}
+			}
 		}
 	}
 	logrus.Infof("%d user space stack traces collected (%d lost)", report.GetStackTraceCount().User, report.GetStackTraceCount().LostUser)
 	logrus.Infof("%d kernel space stack traces collected (%d lost)", report.GetStackTraceCount().Kernel, report.GetStackTraceCount().LostKernel)
 	logrus.Infof("Tracing lasted for %s", report.GetDuration())
 
-	if options.GenerateGraph {
-		if err := generateDotGraph(report, options); err != nil {
-			logrus.Warnf("couldn't generate graph: %s", err)
-		}
+	for _, msg := range printLater {
+		logrus.Infoln(msg)
 	}
-
 }
 
 func generateNodeID(node utrace.StackTraceNode) string {
 	name := node.Symbol.Name
-	if name == utrace.UserSymbolNotFound.Name || name == utrace.KernelSymbolNotFound.Name {
+	if name == utrace.SymbolNotFound.Name {
 		if node.Symbol.Value > 0 {
 			name = fmt.Sprintf("0x%x", node.Symbol.Value)
 		} else {
@@ -98,7 +125,7 @@ func reverse(lines []string) []string {
 	return lines
 }
 
-func generateDotGraph(report utrace.Report, options CLIOptions) error {
+func generateDotGraph(report utrace.Report, tracedFuncs []utrace.Func, binary *utrace.TracedBinary) (string, error) {
 	tmpl := `strict digraph {
       label     = "{{ .Title }}"
       labelloc  =  "t"
@@ -128,7 +155,7 @@ func generateDotGraph(report utrace.Report, options CLIOptions) error {
 
 	maxHits := uint64(1)
 	var usrFuncCount, krnFuncCount int
-	for i, f := range report.GetFunctionsByHits() {
+	for i, f := range tracedFuncs {
 		if f.Type == utrace.Kernel {
 			krnFuncCount++
 		} else {
@@ -161,7 +188,7 @@ func generateDotGraph(report utrace.Report, options CLIOptions) error {
 				Color: color,
 				Label: fmt.Sprintf("{ %s | hits:%d | avg_latency:%s }", f.Symbol.Name, f.Count, f.AverageLatency),
 			}
-			if f.Symbol.Name == utrace.KernelSymbolNotFound.Name || f.Symbol.Name == utrace.UserSymbolNotFound.Name {
+			if f.Symbol.Name == utrace.SymbolNotFound.Name {
 				data.Nodes[fNodeID].Label = fmt.Sprintf("{ 0x%x }", f.Symbol.Value)
 			}
 		}
@@ -187,7 +214,7 @@ func generateDotGraph(report utrace.Report, options CLIOptions) error {
 						Color: userColor,
 						Label: fmt.Sprintf("{ %s }", n.Symbol.Name),
 					}
-					if n.Symbol.Name == utrace.UserSymbolNotFound.Name {
+					if n.Symbol.Name == utrace.SymbolNotFound.Name {
 						data.Nodes[nodeID].Label = fmt.Sprintf("{ 0x%x }", n.Offset)
 					}
 				}
@@ -211,7 +238,7 @@ func generateDotGraph(report utrace.Report, options CLIOptions) error {
 						Color: kernelColor,
 						Label: fmt.Sprintf("{ %s }", n.Symbol.Name),
 					}
-					if n.Symbol.Name == utrace.KernelSymbolNotFound.Name {
+					if n.Symbol.Name == utrace.SymbolNotFound.Name {
 						data.Nodes[nodeID].Label = fmt.Sprintf("{ 0x%x }", n.Offset)
 					}
 				}
@@ -246,8 +273,8 @@ func generateDotGraph(report utrace.Report, options CLIOptions) error {
 	}
 
 	// generate graph title
-	if len(options.UTraceOptions.Binary) > 0 {
-		data.Title += fmt.Sprintf("[binary: %s]", options.UTraceOptions.Binary)
+	if binary != nil {
+		data.Title += fmt.Sprintf("[binary: %s]", binaryTitle(binary))
 	}
 	data.Title += fmt.Sprintf("\n[kernel: %d traced function(s), %d stack trace(s), %d lost]", krnFuncCount, report.GetStackTraceCount().Kernel, report.GetStackTraceCount().LostKernel)
 	data.Title += fmt.Sprintf("\n[user: %d traced function(s), %d stack trace(s), %d lost]", usrFuncCount, report.GetStackTraceCount().User, report.GetStackTraceCount().LostUser)
@@ -255,33 +282,48 @@ func generateDotGraph(report utrace.Report, options CLIOptions) error {
 
 	f, err := ioutil.TempFile("/tmp", "utrace-graph-")
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer f.Close()
 
 	if err := os.Chmod(f.Name(), os.ModePerm); err != nil {
-		return err
+		return "", err
 	}
 
 	t := template.Must(template.New("tmpl").Parse(tmpl))
 	if err := t.Execute(f, data); err != nil {
-		return err
+		return "", err
 	}
-	logrus.Infof("Graph generated: %s", f.Name())
-	return nil
+	return f.Name(), nil
 }
 
-func dumpReport(report utrace.Report) {
-	fmt.Printf("%10v %s\n", "COUNT", "FUNC_NAME")
-	for _, f := range report.GetFunctionsByHits() {
-		fmt.Printf("%10v %s\n", f.Count, f.Symbol.Name)
+func dumpReport(report utrace.Report, tracer *utrace.UTrace) {
+	for cookie, funcs := range report.GetFunctionsByHits() {
+		binary := tracer.TracedBinaries[cookie]
+		if binary != nil {
+			fmt.Printf("\nUserspace and kernel space functions hits for %s:\n", binaryTitle(binary))
+		} else {
+			fmt.Printf("\nKernel functions hits:\n")
+		}
+		fmt.Printf("\n%10v %s\n", "COUNT", "FUNC_NAME")
+		for _, f := range funcs {
+			fmt.Printf("%10v %s\n", f.Count, f.Symbol.Name)
+		}
 	}
 }
 
-func dumpReportWithLatency(report utrace.Report) {
-	fmt.Printf("%10v %20v %s\n", "COUNT", "AVG_LATENCY", "FUNC_NAME")
-	for _, f := range report.GetFunctionsByLatency() {
-		fmt.Printf("%10v %20v %s\n", f.Count, f.AverageLatency, f.Symbol.Name)
+func dumpReportWithLatency(report utrace.Report, tracer *utrace.UTrace) {
+	for cookie, funcs := range report.GetFunctionsByLatency() {
+		binary := tracer.TracedBinaries[cookie]
+		if binary != nil {
+			fmt.Printf("\nUserspace and kernel space functions ordered by latency for %s:\n", binaryTitle(binary))
+		} else {
+			fmt.Printf("\nKernel functions ordered by latency:\n")
+		}
+		fmt.Printf("%10v %20v %s\n", "COUNT", "AVG_LATENCY", "FUNC_NAME")
+		for _, f := range funcs {
+			fmt.Printf("%10v %20v %s\n", f.Count, f.AverageLatency, f.Symbol.Name)
+		}
 	}
 }
 
@@ -290,38 +332,51 @@ const (
 	stackTracesDumpNodeFormat = "%s;%s;0x%x;%d;%s;"
 )
 
-func dumpStackTraces(report utrace.Report) error {
+func binaryTitle(binary *utrace.TracedBinary) string {
+	var str string
+	if len(binary.ResolvedPath) > 0 {
+		str += binary.ResolvedPath
+	} else {
+		str += binary.Path
+	}
+	if len(binary.Pids) > 0 {
+		str += fmt.Sprintf(" %v", binary.Pids)
+	}
+	return str
+}
+
+func dumpStackTraces(report utrace.Report, tracedFuncs []utrace.Func) (string, error) {
 	d, err := ioutil.TempFile("/tmp", "utrace-dump-")
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer d.Close()
 	if _, err = d.WriteString(stackTracesDumpHeader); err != nil {
-		return err
+		return "", err
 	}
 
 	var latency time.Duration
-	for _, f := range report.GetFunctionsByHits() {
+	for _, f := range tracedFuncs {
+		fmt.Printf("\n  - symbol %v:\n", f.Symbol.Name)
 		if len(f.GetStackTracesByHits()) == 0 {
 			continue
 		}
-		fmt.Printf("\nDumping stack traces for symbol %v:\n", f.Symbol.Name)
 
 		for stackID, trace := range f.GetStackTracesByHits() {
-			fmt.Printf("\t* Stack %d [%d hit(s)]\n", stackID, trace.Count)
+			fmt.Printf("\n\t* Stack %d [%d hit(s)]\n", stackID, trace.Count)
 			if _, err = d.WriteString(fmt.Sprintf("%d;", trace.Count)); err != nil {
-				return err
+				return "", err
 			}
 
 			for _, n := range trace.UserStacktrace {
 				latency = 0
 				fmt.Printf("\t\t- %s (offset: 0x%x)\n", n.Symbol.Name, n.Offset)
-				if fun := report.GetFunc(n.FuncID, utrace.User); fun.Symbol.Name != utrace.UserSymbolNotFound.Name {
+				if fun := report.GetFunc(n.FuncID); fun.Symbol.Name != utrace.SymbolNotFound.Name {
 					fmt.Printf("\t\t\thit(s): %d avg_latency: %s\n", fun.Count, fun.AverageLatency)
 					latency = fun.AverageLatency
 				}
 				if _, err = d.WriteString(fmt.Sprintf(stackTracesDumpNodeFormat, n.Symbol.Name, n.Type, n.Symbol.Value, n.Offset, latency)); err != nil {
-					return err
+					return "", err
 				}
 			}
 			if len(trace.KernelStackTrace) > 0 {
@@ -330,19 +385,18 @@ func dumpStackTraces(report utrace.Report) error {
 			for _, n := range trace.KernelStackTrace {
 				latency = 0
 				fmt.Printf("\t\t- %s (offset: 0x%x)\n", n.Symbol.Name, n.Offset)
-				if fun := report.GetFunc(n.FuncID, utrace.Kernel); fun.Symbol.Name != utrace.KernelSymbolNotFound.Name {
+				if fun := report.GetFunc(n.FuncID); fun.Symbol.Name != utrace.SymbolNotFound.Name {
 					fmt.Printf("\t\t\thit(s): %d avg_latency: %s\n", fun.Count, fun.AverageLatency)
 					latency = fun.AverageLatency
 				}
 				if _, err = d.WriteString(fmt.Sprintf(stackTracesDumpNodeFormat, n.Symbol.Name, n.Type, n.Symbol.Value, n.Offset, latency)); err != nil {
-					return err
+					return "", err
 				}
 			}
 			if _, err = d.WriteString("\n"); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
-	logrus.Infof("Stack traces dump generated: %s", d.Name())
-	return nil
+	return d.Name(), nil
 }

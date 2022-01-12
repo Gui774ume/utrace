@@ -28,15 +28,15 @@ int tracepoint_sched_sched_process_exec(struct sched_process_exec_args *ctx)
     struct path_t path = {};
     bpf_probe_read_str(&path.filename, PATH_MAX_LEN, filename);
 
-    u32 *match = bpf_map_lookup_elem(&binary_path, &path.filename);
-    if (match == NULL) {
+    u32 *cookie = bpf_map_lookup_elem(&binary_path, &path.filename);
+    if (cookie == NULL) {
         return 0;
     }
 
     // insert pid in list of traced pids
+    u32 new_cookie = *cookie;
     u32 pid = bpf_get_current_pid_tgid() >> 32;
-    u32 traced = 1;
-    bpf_map_update_elem(&traced_pids, &pid, &traced, BPF_ANY);
+    bpf_map_update_elem(&traced_pids, &pid, &new_cookie, BPF_ANY);
     return 0;
 };
 
