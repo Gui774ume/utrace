@@ -89,6 +89,8 @@ func (uos *UTraceOptionsSanitizer) String() string {
 		return fmt.Sprintf("%v", uos.options.FuncPattern)
 	case "kernel-pattern":
 		return fmt.Sprintf("%v", uos.options.KernelFuncPattern)
+	case "tracepoint":
+		return fmt.Sprintf("%v", uos.options.Tracepoints)
 	}
 	return ""
 }
@@ -131,6 +133,11 @@ func (uos *UTraceOptionsSanitizer) Set(val string) error {
 			return fmt.Errorf("'%s' isn't a valid kernel pattern: %v", val, err)
 		}
 		uos.options.KernelFuncPattern = pattern
+	case "tracepoint":
+		if len(val) == 0 {
+			return fmt.Errorf("empty tracepoint")
+		}
+		uos.options.Tracepoints = append(uos.options.Tracepoints, val)
 	}
 	return nil
 }
@@ -143,6 +150,8 @@ func (uos *UTraceOptionsSanitizer) Type() string {
 		return "string array"
 	case "pattern", "kernel-pattern":
 		return "regexp"
+	case "tracepoint":
+		return "string array"
 	}
 	return ""
 }

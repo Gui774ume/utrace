@@ -71,4 +71,8 @@ func init() {
 		NewUTraceOptionsSanitizer(&options.UTraceOptions, "pid"),
 		"pid",
 		`list of pids to trace. Leave empty to disable filtering`)
+	Utrace.Flags().Var(
+		NewUTraceOptionsSanitizer(&options.UTraceOptions, "tracepoint"),
+		"tracepoint",
+		`list of tracepoints to trace. Expected format: [category]:[name]`)
 }
