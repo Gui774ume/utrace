@@ -148,7 +148,15 @@ func (u *UTrace) Stop() (Report, error) {
 
 	// sleep until the perf map is empty
 	logrus.Infof("flushing the remaining events in the perf map ...")
-	time.Sleep(5 * time.Second)
+	var done bool
+	var lastCount uint64
+	for !done {
+		lastCount = atomic.LoadUint64(&u.kernelStackTraceCounter) + atomic.LoadUint64(&u.userStackTraceCounter)
+		time.Sleep(1 * time.Second)
+		if lastCount == atomic.LoadUint64(&u.kernelStackTraceCounter)+atomic.LoadUint64(&u.userStackTraceCounter) {
+			done = true
+		}
+	}
 
 	// dump
 	dump, err := u.dump()
