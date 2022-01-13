@@ -40,7 +40,7 @@ var (
 	// EmptyBinaryPathErr indicates that a userspace symbol pattern was provided but without a binary path
 	EmptyBinaryPathErr = errors.New("empty binary path")
 	// NoPatternProvidedErr indicates that no function pattern was provided
-	NoPatternProvidedErr = errors.New("no function pattern was provided")
+	NoPatternProvidedErr = errors.New("no function pattern or hook point was provided")
 )
 
 // StackID is a unique identifier used to select a stack trace
@@ -65,6 +65,7 @@ const PathMax = 350
 type Options struct {
 	FuncPattern       *regexp.Regexp
 	KernelFuncPattern *regexp.Regexp
+	Tracepoints       []string
 	Latency           bool
 	StackTraces       bool
 	Binary            []string

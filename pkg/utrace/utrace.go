@@ -87,7 +87,7 @@ func NewUTrace(options Options) *UTrace {
 // Start hooks on the requested symbols and begins tracing
 func (u *UTrace) Start() error {
 	// ensure that at least one function pattern was provided
-	if u.options.FuncPattern == nil && u.options.KernelFuncPattern == nil {
+	if u.options.FuncPattern == nil && u.options.KernelFuncPattern == nil && len(u.options.Tracepoints) == 0 {
 		return NoPatternProvidedErr
 	}
 
@@ -359,6 +359,13 @@ func (u *UTrace) start() error {
 		}
 	}
 
+	// setup tracepoint probes
+	if len(u.options.Tracepoints) > 0 {
+		if err = u.generateTracepoints(); err != nil {
+			return fmt.Errorf("couldn't generate tracepoints: %w", err)
+		}
+	}
+
 	if len(u.funcCache) == 0 {
 		return fmt.Errorf("nothing matched the provided pattern(s)")
 	}
@@ -524,6 +531,11 @@ func (u *UTrace) generateUProbes(binary *TracedBinary) error {
 }
 
 func (u *UTrace) parseKallsyms() error {
+	if len(u.kallsymsCache) > 0 {
+		// this has already been done
+		return nil
+	}
+
 	kallsymsRaw, err := ioutil.ReadFile("/proc/kallsyms")
 	if err != nil {
 		return err
@@ -653,6 +665,71 @@ func (u *UTrace) generateKProbes() error {
 
 		u.funcCache[funcID] = TracedSymbol{symbol: sym}
 		u.kernelSymbolNameToFuncID[sym.Name] = funcID
+	}
+
+	u.managerOptions.ActivatedProbes = append(u.managerOptions.ActivatedProbes, &oneOfSelector)
+	u.managerOptions.ConstantEditors = append(u.managerOptions.ConstantEditors, constantEditors...)
+
+	return nil
+}
+
+func (u *UTrace) generateTracepoints() error {
+	if err := u.parseKallsyms(); err != nil {
+		return errors.Wrap(err, "couldn't parse /proc/kallsyms")
+	}
+
+	if uint32(len(u.options.Tracepoints)) > MaxKernelSymbolsCount {
+		logrus.Warnf("only the first %d tracepoints will be traced (out of %d)", MaxKernelSymbolsCount, len(u.options.Tracepoints))
+		u.options.Tracepoints = u.options.Tracepoints[0:MaxKernelSymbolsCount]
+	}
+
+	// configure a probe for each tracepoint we're going to hook onto
+	var oneOfSelector manager.OneOf
+	var constantEditors []manager.ConstantEditor
+
+	for _, tracepoint := range u.options.Tracepoints {
+		funcID := u.nextFuncID()
+		probeUID := RandomStringWithLen(10)
+
+		tpDef := strings.Split(tracepoint, ":")
+		if len(tpDef) != 2 {
+			return fmt.Errorf("'%s' isn't a valid tracepoint (expected format is [category]:[name])", tracepoint)
+		}
+
+		probe := &manager.Probe{
+			ProbeIdentificationPair: manager.ProbeIdentificationPair{
+				UID:          probeUID,
+				EBPFSection:  "tracepoint/utrace",
+				EBPFFuncName: "tracepoint_utrace",
+			},
+			CopyProgram:        true,
+			TracepointCategory: tpDef[0],
+			TracepointName:     tpDef[1],
+		}
+		u.manager.Probes = append(u.manager.Probes, probe)
+		oneOfSelector.Selectors = append(oneOfSelector.Selectors, &manager.ProbeSelector{
+			ProbeIdentificationPair: probe.ProbeIdentificationPair,
+		})
+		constantEditors = append(constantEditors, manager.ConstantEditor{
+			Name:  "func_id",
+			Value: uint64(funcID),
+			ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
+				probe.ProbeIdentificationPair,
+			},
+		})
+		if len(u.options.Binary) > 0 || len(u.options.PIDFilter) > 0 {
+			constantEditors = append(constantEditors, manager.ConstantEditor{
+				Name:  "filter_user_binary",
+				Value: uint64(1),
+				ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
+					probe.ProbeIdentificationPair,
+				},
+			})
+		}
+
+		// 0xffffffff00000001 is a fake value inserted to make sure that the tracepoint is part of the kernel stack trace
+		u.funcCache[funcID] = TracedSymbol{symbol: elf.Symbol{Name: tracepoint, Value: 0xffffffff00000001}}
+		u.kernelSymbolNameToFuncID[tracepoint] = funcID
 	}
 
 	u.managerOptions.ActivatedProbes = append(u.managerOptions.ActivatedProbes, &oneOfSelector)

@@ -91,7 +91,7 @@ INFO[2021-02-03T00:10:43Z] Graph generated: /tmp/utrace-dump-120828521
 #### Trace eBPF map operations in system-probe
 
 ```shell script
-# ~ sudo utrace --binary /home/vagrant/go/src/github.com/DataDog/datadog-agent/bin/system-probe/system-probe --generate-graph --kernel-pattern "(^finish_task_switch$)"
+# ~ sudo utrace --binary /home/vagrant/go/src/github.com/DataDog/datadog-agent/bin/system-probe/system-probe --generate-graph --pattern "github.com/DataDog/ebpf-manager.\(\*PerfMap\)|github.com/cilium/ebpf.\(\*Map\)"
 ```
 
 ![utrace-ebpf-map.svg](documentation/utrace-ebpf-map.svg)
@@ -103,3 +103,11 @@ INFO[2021-02-03T00:10:43Z] Graph generated: /tmp/utrace-dump-120828521
 ```
 
 ![utrace-ovl.svg](documentation/utrace-ovl.svg)
+
+#### Trace page faults in system-probe on startup
+
+```shell script
+# ~ sudo utrace --binary /home/vagrant/go/src/github.com/DataDog/datadog-agent/bin/system-probe/system-probe --generate-graph --tracepoint "exceptions:page_fault_user"
+```
+
+![utrace-ovl.svg](documentation/utrace-tracepoint.svg)
