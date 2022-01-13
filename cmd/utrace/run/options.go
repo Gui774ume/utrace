@@ -91,6 +91,8 @@ func (uos *UTraceOptionsSanitizer) String() string {
 		return fmt.Sprintf("%v", uos.options.KernelFuncPattern)
 	case "tracepoint":
 		return fmt.Sprintf("%v", uos.options.Tracepoints)
+	case "perf":
+		return fmt.Sprintf("%v", uos.options.PerfEvents)
 	}
 	return ""
 }
@@ -138,6 +140,11 @@ func (uos *UTraceOptionsSanitizer) Set(val string) error {
 			return fmt.Errorf("empty tracepoint")
 		}
 		uos.options.Tracepoints = append(uos.options.Tracepoints, val)
+	case "perf":
+		if len(val) == 0 {
+			return fmt.Errorf("empty perf event")
+		}
+		uos.options.PerfEvents = append(uos.options.PerfEvents, val)
 	}
 	return nil
 }
@@ -151,6 +158,8 @@ func (uos *UTraceOptionsSanitizer) Type() string {
 	case "pattern", "kernel-pattern":
 		return "regexp"
 	case "tracepoint":
+		return "string array"
+	case "perf":
 		return "string array"
 	}
 	return ""
