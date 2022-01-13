@@ -110,4 +110,12 @@ INFO[2021-02-03T00:10:43Z] Graph generated: /tmp/utrace-dump-120828521
 # ~ sudo utrace --binary /home/vagrant/go/src/github.com/DataDog/datadog-agent/bin/system-probe/system-probe --generate-graph --tracepoint "exceptions:page_fault_user"
 ```
 
-![utrace-ovl.svg](documentation/utrace-tracepoint.svg)
+![utrace-tracepoint.svg](documentation/utrace-tracepoint.svg)
+
+#### Trace task-clock perf event in system-probe on startup
+
+```shell script
+# ~ sudo utrace  --binary /home/vagrant/go/src/github.com/DataDog/datadog-agent/bin/system-probe/system-probe --generate-graph --perf 1:1:10
+```
+
+![utrace-perf-event.svg](documentation/utrace-perf-event.svg)
