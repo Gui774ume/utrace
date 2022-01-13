@@ -34,21 +34,27 @@ func init() {
 		"log-level",
 		"l",
 		`log level, options: panic, fatal, error, warn, info, debug or trace`)
+	Utrace.Flags().BoolVarP(
+		&options.GenerateGraph,
+		"generate-graph",
+		"g",
+		false,
+		`when set, utrace will generate a .dot graph with the collected statistics`)
 	Utrace.Flags().VarP(
-		NewPathSanitizer(&options.UTraceOptions.Binary),
+		NewUTraceOptionsSanitizer(&options.UTraceOptions, "binary"),
 		"binary",
 		"b",
-		`Path to the binary`)
+		`list of paths to the binaries you want to trace`)
 	Utrace.Flags().VarP(
-		NewRegexpSanitizerWithDefault(&options.UTraceOptions.FuncPattern, nil),
+		NewUTraceOptionsSanitizer(&options.UTraceOptions, "pattern"),
 		"pattern",
 		"p",
-		`function(s) pattern to trace`)
+		`user space function(s) pattern to trace`)
 	Utrace.Flags().VarP(
-		NewRegexpSanitizerWithDefault(&options.UTraceOptions.KernelFuncPattern, nil),
+		NewUTraceOptionsSanitizer(&options.UTraceOptions, "kernel-pattern"),
 		"kernel-pattern",
 		"k",
-		`kernel function(s) pattern to trace`)
+		`kernel space function(s) pattern to trace`)
 	Utrace.Flags().BoolVarP(
 		&options.UTraceOptions.Latency,
 		"latency",
@@ -61,15 +67,8 @@ func init() {
 		"s",
 		false,
 		`when set, utrace will use uprobes to collect functions stack traces`)
-	Utrace.Flags().BoolVarP(
-		&options.GenerateGraph,
-		"generate-graph",
-		"g",
-		false,
-		`when set, utrace will generate a .dot graph with the collected statistics`)
-	Utrace.Flags().IntVar(
-		&options.UTraceOptions.PIDFilter,
+	Utrace.Flags().Var(
+		NewUTraceOptionsSanitizer(&options.UTraceOptions, "pid"),
 		"pid",
-		0,
-		`when set, utrace will add the provided pid to the list of traced pids. Leave empty to disable filtering.`)
+		`list of pids to trace. Leave empty to disable filtering`)
 }

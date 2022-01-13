@@ -20,11 +20,11 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/Gui774ume/utrace/pkg/utrace"
-
-	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 // CLIOptions are the command line options of ssh-probe
@@ -65,67 +65,84 @@ func (lls *LogLevelSanitizer) Type() string {
 	return "string"
 }
 
-// PathSanitizer is a path sanitizer that ensures that the provided path exists
-type PathSanitizer struct {
-	path *string
+// UTraceOptionsSanitizer is a generic options sanitizer for UTrace
+type UTraceOptionsSanitizer struct {
+	field   string
+	options *utrace.Options
 }
 
-// NewPathSanitizer creates a new instance of PathSanitizer. The sanitized path will be written in the provided string
-func NewPathSanitizer(sanitizedPath *string) *PathSanitizer {
-	return &PathSanitizer{
-		path: sanitizedPath,
+// NewUTraceOptionsSanitizer creates a new instance of UTraceOptionsSanitizer
+func NewUTraceOptionsSanitizer(options *utrace.Options, field string) *UTraceOptionsSanitizer {
+	return &UTraceOptionsSanitizer{
+		options: options,
+		field:   field,
 	}
 }
 
-func (ps *PathSanitizer) String() string {
-	return fmt.Sprintf("%v", *ps.path)
+func (uos *UTraceOptionsSanitizer) String() string {
+	switch uos.field {
+	case "pid":
+		return fmt.Sprintf("%v", uos.options.PIDFilter)
+	case "binary":
+		return fmt.Sprintf("%v", uos.options.Binary)
+	case "pattern":
+		return fmt.Sprintf("%v", uos.options.FuncPattern)
+	case "kernel-pattern":
+		return fmt.Sprintf("%v", uos.options.KernelFuncPattern)
+	}
+	return ""
 }
 
-func (ps *PathSanitizer) Set(val string) error {
-	if len(val) == 0 {
-		return nil
+func (uos *UTraceOptionsSanitizer) Set(val string) error {
+	switch uos.field {
+	case "pid":
+		pid, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("%v is not a valid pid value: %v", val, err)
+		}
+		uos.options.PIDFilter = append(uos.options.PIDFilter, pid)
+	case "binary":
+		if len(val) == 0 {
+			return nil
+		}
+		if len(val) > utrace.PathMax {
+			return fmt.Errorf("%v is longer than the maximum length allowed for a binary path: got %d, limit is %d", val, len(val), utrace.PathMax)
+		}
+		// check if the file exists
+		if _, err := os.Stat(val); err != nil {
+			return fmt.Errorf("can't trace %s: %v", val, err)
+		}
+		uos.options.Binary = append(uos.options.Binary, val)
+	case "pattern":
+		if len(val) == 0 {
+			return fmt.Errorf("empty pattern")
+		}
+		pattern, err := regexp.Compile(val)
+		if err != nil {
+			return fmt.Errorf("'%s' isn't a valid pattern: %v", val, err)
+		}
+		uos.options.FuncPattern = pattern
+	case "kernel-pattern":
+		if len(val) == 0 {
+			return fmt.Errorf("empty kernel pattern")
+		}
+		pattern, err := regexp.Compile(val)
+		if err != nil {
+			return fmt.Errorf("'%s' isn't a valid kernel pattern: %v", val, err)
+		}
+		uos.options.KernelFuncPattern = pattern
 	}
-	if _, err := os.Stat(val); err != nil {
-		return err
-	}
-	*ps.path = val
 	return nil
 }
 
-func (ps *PathSanitizer) Type() string {
-	return "string"
-}
-
-// RegexpSanitizer is a regexp sanitizer that ensures that the provided regexp is valid
-type RegexpSanitizer struct {
-	pattern **regexp.Regexp
-}
-
-// NewRegexpSanitizerWithDefault creates a new instance of RegexpSanitizer. The sanitized regexp will be written in the provided
-// regexp pointer
-func NewRegexpSanitizerWithDefault(sanitizedPattern **regexp.Regexp, defaultPattern *regexp.Regexp) *RegexpSanitizer {
-	*sanitizedPattern = defaultPattern
-	return &RegexpSanitizer{
-		pattern: sanitizedPattern,
+func (uos *UTraceOptionsSanitizer) Type() string {
+	switch uos.field {
+	case "pid":
+		return "int array"
+	case "binary":
+		return "string array"
+	case "pattern", "kernel-pattern":
+		return "regexp"
 	}
-}
-
-func (rs *RegexpSanitizer) String() string {
-	return "*"
-}
-
-func (rs *RegexpSanitizer) Set(val string) error {
-	if len(val) == 0 {
-		return errors.New("empty pattern")
-	}
-	pattern, err := regexp.Compile(val)
-	if err != nil {
-		return errors.Wrap(err, "invalid pattern")
-	}
-	*rs.pattern = pattern
-	return nil
-}
-
-func (rs *RegexpSanitizer) Type() string {
-	return "regexp"
+	return ""
 }

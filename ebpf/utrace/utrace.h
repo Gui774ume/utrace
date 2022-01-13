@@ -14,16 +14,14 @@ int uprobe_utrace(void *ctx)
     u64 now = bpf_ktime_get_ns();
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid = pid_tgid >> 32;
+    u32 cookie = 0;
 
-    // check if a filter should be applied on the process that made the call
-    u32 filter_user_binary = load_filter_user_binary();
-    if (filter_user_binary) {
-        // check if this pid is traced
-        u32 *traced = bpf_map_lookup_elem(&traced_pids, &pid);
-        if (traced == NULL) {
-            return 0;
-        }
+    // fetch pid cookie
+    u32 *traced = bpf_map_lookup_elem(&traced_pids, &pid);
+    if (traced == NULL) {
+        return 0;
     }
+    cookie = *traced;
 
     // hits counter
     u32 func_id = load_func_id();
@@ -45,8 +43,9 @@ int uprobe_utrace(void *ctx)
     u32 send_stack_trace = load_send_stack_trace();
     if (send_stack_trace) {
         struct trace_event_t evt = {};
-        evt.pid = key.pid,
-        evt.func_id = key.func_id,
+        evt.pid = key.pid;
+        evt.func_id = key.func_id;
+        evt.cookie = cookie;
         evt.user_stack_id = bpf_get_stackid(ctx, &stack_traces, BPF_F_FAST_STACK_CMP | BPF_F_USER_STACK | BPF_F_REUSE_STACKID);
 
         u32 cpu = bpf_get_smp_processor_id();
@@ -66,18 +65,6 @@ SEC("uretprobe/utrace")
 int uretprobe_utrace(void *ctx)
 {
     u64 now = bpf_ktime_get_ns();
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 pid = pid_tgid >> 32;
-
-    // check if a filter should be applied on the process that made the call
-    u32 filter_user_binary = load_filter_user_binary();
-    if (filter_user_binary) {
-        // check if this pid is traced
-        u32 *traced = bpf_map_lookup_elem(&traced_pids, &pid);
-        if (traced == NULL) {
-            return 0;
-        }
-    }
 
     // hits counter
     u32 func_id = load_func_id();
@@ -107,6 +94,7 @@ int kprobe_utrace(void *ctx)
     u64 now = bpf_ktime_get_ns();
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid = pid_tgid >> 32;
+    u32 cookie = 0;
 
     // check if a filter should be applied on the process that made the call
     u32 filter_user_binary = load_filter_user_binary();
@@ -116,6 +104,7 @@ int kprobe_utrace(void *ctx)
         if (traced == NULL) {
             return 0;
         }
+        cookie = *traced;
     }
 
     // hits counter
@@ -138,8 +127,9 @@ int kprobe_utrace(void *ctx)
     u32 send_stack_trace = load_send_stack_trace();
     if (send_stack_trace) {
         struct trace_event_t evt = {};
-        evt.pid = key.pid,
-        evt.func_id = key.func_id,
+        evt.pid = key.pid;
+        evt.func_id = key.func_id;
+        evt.cookie = cookie;
         evt.kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0 | BPF_F_FAST_STACK_CMP | BPF_F_REUSE_STACKID);
 
         if (filter_user_binary) {

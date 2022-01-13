@@ -48,7 +48,7 @@ struct start_ts_key_t {
 };
 
 struct bpf_map_def SEC("maps/start_ts") start_ts = {
-    .type = BPF_MAP_TYPE_HASH,
+    .type = BPF_MAP_TYPE_LRU_HASH,
     .key_size = sizeof(struct start_ts_key_t),
     .value_size = sizeof(u64),
     .max_entries = 4096,
@@ -83,6 +83,7 @@ struct trace_event_t {
     u32 user_stack_id;
     u32 kernel_stack_id;
     u32 func_id;
+    u32 cookie;
 };
 
 struct bpf_map_def SEC("maps/trace_events") trace_events = {
@@ -102,19 +103,19 @@ struct path_t
 };
 
 struct bpf_map_def SEC("maps/binary_path") binary_path = {
-    .type = BPF_MAP_TYPE_HASH,
+    .type = BPF_MAP_TYPE_LRU_HASH,
     .key_size = sizeof(struct path_t),
     .value_size = sizeof(u32),
-    .max_entries = 1,
+    .max_entries = 512,
     .pinning = 0,
     .namespace = "",
 };
 
 struct bpf_map_def SEC("maps/traced_pids") traced_pids = {
-    .type = BPF_MAP_TYPE_HASH,
+    .type = BPF_MAP_TYPE_LRU_HASH,
     .key_size = sizeof(u32),
     .value_size = sizeof(u32),
-    .max_entries = 1024,
+    .max_entries = 4096,
     .pinning = 0,
     .namespace = "",
 };

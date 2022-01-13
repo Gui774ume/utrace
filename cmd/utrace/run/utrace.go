@@ -35,21 +35,21 @@ func utraceCmd(cmd *cobra.Command, args []string) error {
 		options.UTraceOptions.StackTraces = true
 	}
 
-	trace := utrace.NewUTrace(options.UTraceOptions)
-	if err := trace.Start(); err != nil {
+	tracer := utrace.NewUTrace(options.UTraceOptions)
+	if err := tracer.Start(); err != nil {
 		return errors.Wrap(err, "couldn't start")
 	}
 
 	wait()
 
 	// Dump hit counters
-	report, err := trace.Dump()
+	report, err := tracer.Stop()
 	if err != nil {
-		logrus.Error(errors.Wrap(err, "couldn't dump hit counters"))
+		logrus.Error(errors.Wrap(err, "couldn't dump utrace"))
+		return nil
 	}
 
-	dump(report, options)
-	_ = trace.Stop()
+	dump(report, options, tracer)
 	return nil
 }
 
