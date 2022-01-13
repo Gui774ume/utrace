@@ -66,6 +66,7 @@ type Options struct {
 	FuncPattern       *regexp.Regexp
 	KernelFuncPattern *regexp.Regexp
 	Tracepoints       []string
+	PerfEvents        []string
 	Latency           bool
 	StackTraces       bool
 	Binary            []string

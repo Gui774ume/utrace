@@ -75,4 +75,8 @@ func init() {
 		NewUTraceOptionsSanitizer(&options.UTraceOptions, "tracepoint"),
 		"tracepoint",
 		`list of tracepoints to trace. Expected format: [category]:[name]`)
+	Utrace.Flags().Var(
+		NewUTraceOptionsSanitizer(&options.UTraceOptions, "perf"),
+		"perf",
+		`list of perf events to trace. Expected format: [perf_event_type]:[perf_event_name]:[frequency], where perf_event_type, perf_event_name and frequency are numbers. For example, add '1:1:1' to trace PERF_COUNT_SW_TASK_CLOCK from the PERF_TYPE_SOFTWARE perf events at a frequency of 1 event per second`)
 }

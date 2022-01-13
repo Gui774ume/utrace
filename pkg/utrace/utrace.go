@@ -87,7 +87,7 @@ func NewUTrace(options Options) *UTrace {
 // Start hooks on the requested symbols and begins tracing
 func (u *UTrace) Start() error {
 	// ensure that at least one function pattern was provided
-	if u.options.FuncPattern == nil && u.options.KernelFuncPattern == nil && len(u.options.Tracepoints) == 0 {
+	if u.options.FuncPattern == nil && u.options.KernelFuncPattern == nil && len(u.options.Tracepoints) == 0 && len(u.options.PerfEvents) == 0 {
 		return NoPatternProvidedErr
 	}
 
@@ -363,6 +363,21 @@ func (u *UTrace) start() error {
 	if len(u.options.Tracepoints) > 0 {
 		if err = u.generateTracepoints(); err != nil {
 			return fmt.Errorf("couldn't generate tracepoints: %w", err)
+		}
+	}
+
+	// setup perf events
+	if len(u.options.PerfEvents) > 0 {
+		if len(u.TracedBinaries) == 0 {
+			if err = u.generatePerfEvents(nil); err != nil {
+				return fmt.Errorf("couldn't generate perf events: %w", err)
+			}
+		} else {
+			for _, binary := range u.TracedBinaries {
+				if err = u.generatePerfEvents(binary); err != nil {
+					return fmt.Errorf("couldn't generate perf events: %w", err)
+				}
+			}
 		}
 	}
 
@@ -730,6 +745,97 @@ func (u *UTrace) generateTracepoints() error {
 		// 0xffffffff00000001 is a fake value inserted to make sure that the tracepoint is part of the kernel stack trace
 		u.funcCache[funcID] = TracedSymbol{symbol: elf.Symbol{Name: tracepoint, Value: 0xffffffff00000001}}
 		u.kernelSymbolNameToFuncID[tracepoint] = funcID
+	}
+
+	u.managerOptions.ActivatedProbes = append(u.managerOptions.ActivatedProbes, &oneOfSelector)
+	u.managerOptions.ConstantEditors = append(u.managerOptions.ConstantEditors, constantEditors...)
+
+	return nil
+}
+
+func (u *UTrace) generatePerfEvents(binary *TracedBinary) error {
+	if err := u.parseKallsyms(); err != nil {
+		return errors.Wrap(err, "couldn't parse /proc/kallsyms")
+	}
+
+	if uint32(len(u.options.PerfEvents)) > MaxKernelSymbolsCount {
+		logrus.Warnf("only the first %d perf events will be traced (out of %d)", MaxKernelSymbolsCount, len(u.options.PerfEvents))
+		u.options.PerfEvents = u.options.PerfEvents[0:MaxKernelSymbolsCount]
+	}
+
+	// generate a probe for each traced PID, or a generic one that will match all pids
+	var tracedPIDs []int
+	if binary != nil {
+		tracedPIDs = binary.Pids[:]
+	}
+	if len(tracedPIDs) == 0 {
+		tracedPIDs = []int{0}
+	}
+
+	// configure a probe for each tracepoint we're going to hook onto
+	var oneOfSelector manager.OneOf
+	var constantEditors []manager.ConstantEditor
+
+	for _, perfEvent := range u.options.PerfEvents {
+		funcID := u.nextFuncID()
+		peDefRaw := strings.Split(perfEvent, ":")
+		if len(peDefRaw) != 3 {
+			return fmt.Errorf("'%s' isn't a valid perf event (expected format is [perf_event_type]:[perf_event_name]:[frequency])", perfEvent)
+		}
+		peType, err := strconv.Atoi(peDefRaw[0])
+		if err != nil {
+			return fmt.Errorf("'%s' isn't a valid perf event type (expected format is [perf_event_type]:[perf_event_name]:[frequency]): %w", peDefRaw[0], err)
+		}
+		peName, err := strconv.Atoi(peDefRaw[1])
+		if err != nil {
+			return fmt.Errorf("'%s' isn't a valid perf event name (expected format is [perf_event_type]:[perf_event_name]:[frequency]): %w", peDefRaw[1], err)
+		}
+		peFrequency, err := strconv.Atoi(peDefRaw[2])
+		if err != nil {
+			return fmt.Errorf("'%s' isn't a valid perf event frequency (expected format is [perf_event_type]:[perf_event_name]:[frequency]): %w", peDefRaw[2], err)
+		}
+
+		for _, pid := range tracedPIDs {
+			probeUID := RandomStringWithLen(10)
+			probe := &manager.Probe{
+				ProbeIdentificationPair: manager.ProbeIdentificationPair{
+					UID:          probeUID,
+					EBPFSection:  "perf_event/utrace",
+					EBPFFuncName: "perf_event_utrace",
+				},
+				CopyProgram:     true,
+				PerfEventType:   peType,
+				PerfEventConfig: peName,
+				SampleFrequency: peFrequency,
+			}
+			u.manager.Probes = append(u.manager.Probes, probe)
+			oneOfSelector.Selectors = append(oneOfSelector.Selectors, &manager.ProbeSelector{
+				ProbeIdentificationPair: probe.ProbeIdentificationPair,
+			})
+			constantEditors = append(constantEditors, manager.ConstantEditor{
+				Name:  "func_id",
+				Value: uint64(funcID),
+				ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
+					probe.ProbeIdentificationPair,
+				},
+			})
+			if len(u.options.Binary) > 0 || len(u.options.PIDFilter) > 0 {
+				if pid > 0 {
+					probe.PerfEventPID = pid
+				}
+				constantEditors = append(constantEditors, manager.ConstantEditor{
+					Name:  "filter_user_binary",
+					Value: uint64(1),
+					ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
+						probe.ProbeIdentificationPair,
+					},
+				})
+			}
+		}
+
+		// 0xffffffff00000001 is a fake value inserted to make sure that the tracepoint is part of the kernel stack trace
+		u.funcCache[funcID] = TracedSymbol{symbol: elf.Symbol{Name: perfEvent, Value: 0xffffffff00000001}}
+		u.kernelSymbolNameToFuncID[perfEvent] = funcID
 	}
 
 	u.managerOptions.ActivatedProbes = append(u.managerOptions.ActivatedProbes, &oneOfSelector)
