@@ -1,0 +1,45 @@
+
+Options
+---
+PIDs: Find all binaries associated to these PIDs. uprobe is placed on a binary associated to these PIDs (loaded from proc maps)
+
+BINARY: Associate uprobe to binary (no filter on PID unless explicitely given in other option).
+
+EXECUTABLE: Find all PIDs that run these executable, load all binaries associated. Allow to probe on all these binaries.
+
+Note:
+- PIDs and EXECUTABLE are mutually exclusive (for now at least)
+- BINARY if specified takes precedence on where we want to place the uprobe
+
+Function pattern is associated to one of the options above.
+example : --binary "libc malloc" --executable "exec1 fopen"
+TODO : find a separator
+
+
+FuncID 
+--- 
+Represents the function being probed (uprobe and retprobe have the same ID)
+Proposal: change to TracedFuncID ?
+
+
+TracedBinary
+---
+contains a file 
+pid list: this is not stored at the right place. Proposal : create a trace context structure.
+contains a symbol cache tied this file. Warning: addresses need to be independant from PID
+symbolNameToFuncID : issue. Malloc is available in several libraries. 
+Malloc has several IDs, a symbol name can match several IDs
+TBD : what do we do of this ?
+
+
+New object proposal 
+----------
+
+TracedFunc 
+----
+TracedFuncID
+Pids 
+pointer to Binary 
+
+
+
