@@ -353,6 +353,13 @@ func (te *TraceEvent) UnmarshalBinary(data []byte) (int, error) {
 	return 24, nil
 }
 
+// represents a traced function inside of a binary
+type TracedFunc struct {
+	FuncID       FuncID
+	Pids         []int
+	TracedBinary *TracedBinary
+}
+
 type TracedBinary struct {
 	Path         string
 	ResolvedPath string

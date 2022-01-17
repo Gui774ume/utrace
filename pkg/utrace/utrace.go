@@ -51,7 +51,7 @@ type UTrace struct {
 	manager           *manager.Manager
 	managerOptions    manager.Options
 	startTime         time.Time
-	funcIDCursor      FuncID
+	funcIDCursor      FuncID // indicates the next FuncID to consider
 
 	// kallsymsCache contains the kernel symbols parsed from /proc/kallsyms
 	kallsymsCache map[SymbolAddr]elf.Symbol
@@ -321,9 +321,16 @@ func (u *UTrace) generateTracedBinaries() error {
 		}
 	}
 
+	// symbol can come from any binary loaded for this pid
 	for _, pid := range u.options.PIDFilter {
-		if err = u.insertTracedBinary(fmt.Sprintf("/proc/%d/exe", pid), pid); err != nil {
+		procMaps, err := ListProcMaps(pid)
+		if err != nil {
 			return err
+		}
+		for _, m := range *procMaps {
+			if err = u.insertTracedBinary(m.Path, pid); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
