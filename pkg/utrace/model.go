@@ -61,15 +61,20 @@ type BinaryCookie uint32
 // PathMax - Maximum path length of the binary path handled by utrace
 const PathMax = 350
 
+type FuncPattern struct {
+	Pattern     *regexp.Regexp
+	Binary 		string
+}
+
 // Options contains the parameters of UTrace
 type Options struct {
-	FuncPattern       *regexp.Regexp
+	FuncPattern       *FuncPattern
 	KernelFuncPattern *regexp.Regexp
 	Tracepoints       []string
 	PerfEvents        []string
 	Latency           bool
 	StackTraces       bool
-	Binary            []string
+	Executables       []string
 	PIDFilter         []int
 }
 
@@ -77,7 +82,7 @@ func (o Options) check() error {
 	if o.FuncPattern == nil && o.KernelFuncPattern == nil {
 		return EmptyPatternsErr
 	}
-	if o.FuncPattern != nil && len(o.Binary) == 0 {
+	if o.FuncPattern != nil && len(o.Executables) == 0 {
 		return EmptyBinaryPathErr
 	}
 	return nil

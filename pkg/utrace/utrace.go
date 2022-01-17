@@ -315,7 +315,7 @@ func (u *UTrace) insertTracedBinary(path string, pid int) error {
 
 func (u *UTrace) generateTracedBinaries() error {
 	var err error
-	for _, binary := range u.options.Binary {
+	for _, binary := range u.options.Executables {
 		if err = u.insertTracedBinary(binary, 0); err != nil {
 			return err
 		}
@@ -454,7 +454,7 @@ func (u *UTrace) generateUProbes(binary *TracedBinary) error {
 	// from the entire list of symbols, only keep the functions that match the provided pattern
 	var matches []elf.Symbol
 	for _, sym := range binary.symbolsCache {
-		if elf.ST_TYPE(sym.Info) == elf.STT_FUNC && u.options.FuncPattern.MatchString(sym.Name) {
+		if elf.ST_TYPE(sym.Info) == elf.STT_FUNC && u.options.FuncPattern.Pattern.MatchString(sym.Name) {
 			matches = append(matches, sym)
 		}
 	}
@@ -465,7 +465,7 @@ func (u *UTrace) generateUProbes(binary *TracedBinary) error {
 	}
 
 	if len(matches) == 0 {
-		return fmt.Errorf("no symbol in '%s' match the provided pattern '%s'", binary.Path, u.options.FuncPattern.String())
+		return fmt.Errorf("no symbol in '%s' match the provided pattern '%s'", binary.Path, u.options.FuncPattern.Pattern.String())
 	}
 
 	// relocate the function address with the base address of the binary
@@ -643,7 +643,7 @@ func (u *UTrace) generateKProbes() error {
 				probe.ProbeIdentificationPair,
 			},
 		})
-		if len(u.options.Binary) > 0 || len(u.options.PIDFilter) > 0 {
+		if len(u.options.Executables) > 0 || len(u.options.PIDFilter) > 0 {
 			constantEditors = append(constantEditors, manager.ConstantEditor{
 				Name:  "filter_user_binary",
 				Value: uint64(1),
@@ -674,7 +674,7 @@ func (u *UTrace) generateKProbes() error {
 					retProbe.ProbeIdentificationPair,
 				},
 			})
-			if len(u.options.Binary) > 0 || len(u.options.PIDFilter) > 0 {
+			if len(u.options.Executables) > 0 || len(u.options.PIDFilter) > 0 {
 				constantEditors = append(constantEditors, manager.ConstantEditor{
 					Name:  "filter_user_binary",
 					Value: uint64(1),
@@ -739,7 +739,7 @@ func (u *UTrace) generateTracepoints() error {
 				probe.ProbeIdentificationPair,
 			},
 		})
-		if len(u.options.Binary) > 0 || len(u.options.PIDFilter) > 0 {
+		if len(u.options.Executables) > 0 || len(u.options.PIDFilter) > 0 {
 			constantEditors = append(constantEditors, manager.ConstantEditor{
 				Name:  "filter_user_binary",
 				Value: uint64(1),
@@ -826,7 +826,7 @@ func (u *UTrace) generatePerfEvents(binary *TracedBinary) error {
 					probe.ProbeIdentificationPair,
 				},
 			})
-			if len(u.options.Binary) > 0 || len(u.options.PIDFilter) > 0 {
+			if len(u.options.Executables) > 0 || len(u.options.PIDFilter) > 0 {
 				if pid > 0 {
 					probe.PerfEventPID = pid
 				}

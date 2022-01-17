@@ -41,15 +41,15 @@ func init() {
 		false,
 		`when set, utrace will generate a .dot graph with the collected statistics`)
 	Utrace.Flags().VarP(
-		NewUTraceOptionsSanitizer(&options.UTraceOptions, "binary"),
-		"binary",
-		"b",
-		`list of paths to the binaries you want to trace`)
+		NewUTraceOptionsSanitizer(&options.UTraceOptions, "executable"),
+		"executable",
+		"e",
+		`list of paths to the executables you want to trace`)
 	Utrace.Flags().VarP(
 		NewUTraceOptionsSanitizer(&options.UTraceOptions, "pattern"),
 		"pattern",
 		"p",
-		`user space function(s) pattern to trace`)
+		`user space function(s) pattern to trace, optionally prefixed with a path to binary containing these functions (eg. '/lib/x86_64-linux-gnu/libc.so.6:malloc')`)
 	Utrace.Flags().VarP(
 		NewUTraceOptionsSanitizer(&options.UTraceOptions, "kernel-pattern"),
 		"kernel-pattern",
