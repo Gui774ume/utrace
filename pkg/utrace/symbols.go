@@ -9,12 +9,6 @@ import (
 	"github.com/DataDog/gopsutil/process"
 )
 
-type SymbolInfo struct {
-	elf.Symbol
-	Path        string
-	ProcessAddr SymbolAddr
-	FileOffset  SymbolAddr
-}
 
 func ListProcMaps(pid int) (*[]process.MemoryMapsStat, error) {
 	p, err := process.NewProcess(int32(pid))

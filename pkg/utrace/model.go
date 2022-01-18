@@ -378,7 +378,54 @@ type TracedBinary struct {
 	file               *elf.File
 }
 
+type SymbolInfo struct {
+	elf.Symbol
+	BinaryPath  string
+	ProcessAddr SymbolAddr
+	FileOffset  SymbolAddr
+}
+
 type TracedSymbol struct {
 	symbol elf.Symbol
 	binary *TracedBinary
+}
+
+type BinarySymbols []elf.Symbol
+
+type ProcMapRange struct {
+    Start, End 	uint64
+	Offset 		uint64
+    BinaryPath  string	
+	Symbols     *BinarySymbols
+}
+type ProcMapRanges []ProcMapRange
+
+func (r ProcMapRanges) Len() int           { return len(r) }
+func (r ProcMapRanges) Less(i, j int) bool { return r[i].Start < r[j].Start }
+func (r ProcMapRanges) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r ProcMapRanges) Sort()              { sort.Sort(r) }
+
+func (r ProcMapRanges) Search(v uint64) *ProcMapRange {
+    ln := r.Len()
+    if i := sort.Search(ln, func(i int) bool { return v < r[i].End }); i < ln {
+        if it := &r[i]; v >= it.Start && v < it.End {
+            return it
+        }
+    }
+    return nil
+}
+
+func (r BinarySymbols) Len() int           { return len(r) }
+func (r BinarySymbols) Less(i, j int) bool { return r[i].Value < r[j].Value }
+func (r BinarySymbols) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r BinarySymbols) Sort()              { sort.Sort(r) }
+
+func (r BinarySymbols) Search(v uint64) *elf.Symbol {
+    ln := r.Len()
+    if i := sort.Search(ln, func(i int) bool { return v < r[i].Value + r[i].Size }); i < ln {
+        if it := &r[i]; v >= it.Value && v < it.Value + it.Size {
+            return it
+        }
+    }
+    return nil
 }
