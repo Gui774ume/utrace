@@ -61,15 +61,20 @@ type BinaryCookie uint32
 // PathMax - Maximum path length of the binary path handled by utrace
 const PathMax = 350
 
+type FuncPattern struct {
+	Pattern     *regexp.Regexp
+	Binary 		string
+}
+
 // Options contains the parameters of UTrace
 type Options struct {
-	FuncPattern       *regexp.Regexp
+	FuncPattern       *FuncPattern
 	KernelFuncPattern *regexp.Regexp
 	Tracepoints       []string
 	PerfEvents        []string
 	Latency           bool
 	StackTraces       bool
-	Binary            []string
+	Executables       []string
 	PIDFilter         []int
 }
 
@@ -77,7 +82,7 @@ func (o Options) check() error {
 	if o.FuncPattern == nil && o.KernelFuncPattern == nil {
 		return EmptyPatternsErr
 	}
-	if o.FuncPattern != nil && len(o.Binary) == 0 {
+	if o.FuncPattern != nil && len(o.Executables) == 0 {
 		return EmptyBinaryPathErr
 	}
 	return nil
@@ -353,6 +358,13 @@ func (te *TraceEvent) UnmarshalBinary(data []byte) (int, error) {
 	return 24, nil
 }
 
+// represents a traced function inside of a binary
+type TracedFunc struct {
+	FuncID       FuncID
+	Pids         []int
+	TracedBinary *TracedBinary
+}
+
 type TracedBinary struct {
 	Path         string
 	ResolvedPath string
@@ -366,7 +378,54 @@ type TracedBinary struct {
 	file               *elf.File
 }
 
+type SymbolInfo struct {
+	elf.Symbol
+	BinaryPath  string
+	ProcessAddr SymbolAddr
+	FileOffset  SymbolAddr
+}
+
 type TracedSymbol struct {
 	symbol elf.Symbol
 	binary *TracedBinary
+}
+
+type BinarySymbols []elf.Symbol
+
+type ProcMapRange struct {
+    Start, End 	uint64
+	Offset 		uint64
+    BinaryPath  string	
+	Symbols     *BinarySymbols
+}
+type ProcMapRanges []ProcMapRange
+
+func (r ProcMapRanges) Len() int           { return len(r) }
+func (r ProcMapRanges) Less(i, j int) bool { return r[i].Start < r[j].Start }
+func (r ProcMapRanges) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r ProcMapRanges) Sort()              { sort.Sort(r) }
+
+func (r ProcMapRanges) Search(v uint64) *ProcMapRange {
+    ln := r.Len()
+    if i := sort.Search(ln, func(i int) bool { return v < r[i].End }); i < ln {
+        if it := &r[i]; v >= it.Start && v < it.End {
+            return it
+        }
+    }
+    return nil
+}
+
+func (r BinarySymbols) Len() int           { return len(r) }
+func (r BinarySymbols) Less(i, j int) bool { return r[i].Value < r[j].Value }
+func (r BinarySymbols) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r BinarySymbols) Sort()              { sort.Sort(r) }
+
+func (r BinarySymbols) Search(v uint64) *elf.Symbol {
+    ln := r.Len()
+    if i := sort.Search(ln, func(i int) bool { return v < r[i].Value + r[i].Size }); i < ln {
+        if it := &r[i]; v >= it.Value && v < it.Value + it.Size {
+            return it
+        }
+    }
+    return nil
 }

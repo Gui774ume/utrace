@@ -51,12 +51,15 @@ type UTrace struct {
 	manager           *manager.Manager
 	managerOptions    manager.Options
 	startTime         time.Time
-	funcIDCursor      FuncID
+	funcIDCursor      FuncID // indicates the next FuncID to consider
 
 	// kallsymsCache contains the kernel symbols parsed from /proc/kallsyms
 	kallsymsCache map[SymbolAddr]elf.Symbol
 	// kernelSymbolNameToFuncID contains the FuncID attributed to each kernel symbol
 	kernelSymbolNameToFuncID map[string]FuncID
+
+	procMapsCache map[int]*ProcMapRanges
+	symbolCache   map[string]*BinarySymbols
 
 	// funcCache holds the traced symbol associated to each FuncID (kernel and userspace)
 	funcCache map[FuncID]TracedSymbol
@@ -78,6 +81,8 @@ func NewUTrace(options Options) *UTrace {
 		options:                  options,
 		funcCache:                make(map[FuncID]TracedSymbol),
 		kernelSymbolNameToFuncID: make(map[string]FuncID),
+		procMapsCache:            make(map[int]*ProcMapRanges),
+		symbolCache:              make(map[string]*BinarySymbols),
 		kallsymsCache:            make(map[SymbolAddr]elf.Symbol),
 		stackTraces:              make(map[FuncID]map[CombinedID]*StackTrace),
 		TracedBinaries:           make(map[BinaryCookie]*TracedBinary),
@@ -315,15 +320,22 @@ func (u *UTrace) insertTracedBinary(path string, pid int) error {
 
 func (u *UTrace) generateTracedBinaries() error {
 	var err error
-	for _, binary := range u.options.Binary {
+	for _, binary := range u.options.Executables {
 		if err = u.insertTracedBinary(binary, 0); err != nil {
 			return err
 		}
 	}
 
+	// symbol can come from any binary loaded for this pid
 	for _, pid := range u.options.PIDFilter {
-		if err = u.insertTracedBinary(fmt.Sprintf("/proc/%d/exe", pid), pid); err != nil {
+		procMaps, err := ListProcMaps(pid)
+		if err != nil {
 			return err
+		}
+		for _, m := range *procMaps {
+			if err = u.insertTracedBinary(m.Path, pid); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -344,12 +356,10 @@ func (u *UTrace) start() error {
 	}
 
 	// generate uprobes if a binary file is provided
-	if u.options.FuncPattern != nil {
-		for _, binary := range u.TracedBinaries {
-			if err = u.generateUProbes(binary); err != nil {
-				return fmt.Errorf("couldn't generate uprobes: %w", err)
-			}
-		}
+	if u.options.FuncPattern != nil {		
+		if err = u.generateUProbes(); err != nil {
+			return fmt.Errorf("couldn't generate uprobes: %w", err)
+		}		
 	}
 
 	// setup kprobes if a kernel function pattern was provided
@@ -368,16 +378,8 @@ func (u *UTrace) start() error {
 
 	// setup perf events
 	if len(u.options.PerfEvents) > 0 {
-		if len(u.TracedBinaries) == 0 {
-			if err = u.generatePerfEvents(nil); err != nil {
-				return fmt.Errorf("couldn't generate perf events: %w", err)
-			}
-		} else {
-			for _, binary := range u.TracedBinaries {
-				if err = u.generatePerfEvents(binary); err != nil {
-					return fmt.Errorf("couldn't generate perf events: %w", err)
-				}
-			}
+		if err = u.generatePerfEvents(u.options.PIDFilter); err != nil {
+			return fmt.Errorf("couldn't generate perf events: %w", err)
 		}
 	}
 
@@ -439,33 +441,84 @@ func (u *UTrace) pushKernelFilters() error {
 	return nil
 }
 
-func (u *UTrace) generateUProbes(binary *TracedBinary) error {
-	if u.options.FuncPattern == nil || binary == nil {
-		return nil
+func ComputeFileOffset(f *elf.File, sym elf.Symbol) uint64 {
+	// If the binary is a non-PIE executable, addr must be a virtual address, otherwise it must be an offset relative to
+	// the file load address. For executable (ET_EXEC) binaries and shared objects (ET_DYN), translate the virtual
+	// address to physical address in the binary file.
+	if f.Type == elf.ET_EXEC || f.Type == elf.ET_DYN {
+		for _, prog := range f.Progs {
+			if prog.Type == elf.PT_LOAD {
+				if sym.Value >= prog.Vaddr && sym.Value < (prog.Vaddr+prog.Memsz) {
+					return sym.Value - prog.Vaddr + prog.Off
+				}
+			}
+		}
 	}
+	return sym.Value
+}
 
-	// from the entire list of symbols, only keep the functions that match the provided pattern
-	var matches []elf.Symbol
-	for _, sym := range binary.symbolsCache {
-		if elf.ST_TYPE(sym.Info) == elf.STT_FUNC && u.options.FuncPattern.MatchString(sym.Name) {
-			matches = append(matches, sym)
+func (u *UTrace) generateUProbes() error {
+	if u.options.FuncPattern.Binary != "" {
+		binaryPath := u.options.FuncPattern.Binary
+		// from the entire list of symbols, only keep the functions that match the provided pattern
+		var matches []SymbolInfo
+		f, syms, err := manager.OpenAndListSymbols(binaryPath)
+		if err != nil {
+			return err
+		}
+
+		for _, sym := range syms {
+			if elf.ST_TYPE(sym.Info) == elf.STT_FUNC && u.options.FuncPattern.Pattern.MatchString(sym.Name) {
+				matches = append(matches, SymbolInfo{sym, binaryPath, SymbolAddr(0), 
+					SymbolAddr(ComputeFileOffset(f, sym))})
+			}
+		}
+
+		if uint32(len(matches)) > MaxUserSymbolsCount {
+			logrus.Warnf("%d symbols matched the provided pattern, only the first %d symbols will be traced.", len(matches), MaxUserSymbolsCount)
+			matches = matches[0:MaxUserSymbolsCount]
+		}
+	
+		if len(matches) == 0 {
+			return fmt.Errorf("no symbol in '%s' match the provided pattern '%s'", binaryPath, u.options.FuncPattern.Pattern.String())
+		}
+
+		for _, sym := range matches {
+			if err:=u.generateUProbe(sym, u.options.PIDFilter); err!=nil {
+				return err
+			}
+		}
+	} else {
+		if len(u.options.PIDFilter) == 0 {
+			return errors.New("A PID or binary is required for uprobe")
+		}
+
+		var matches []SymbolInfo
+		for _, pid := range u.options.PIDFilter {
+			syms, err := ListSymbolsFromPID(pid)
+			if err != nil {
+				return err
+			}
+			
+			for _, symInfo := range syms {
+				if elf.ST_TYPE(symInfo.Info) == elf.STT_FUNC && u.options.FuncPattern.Pattern.MatchString(symInfo.Name) {
+					matches = append(matches, symInfo)
+				}
+			}
+			for _, sym := range matches {
+				if err := u.generateUProbe(sym, []int{pid}); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
-	if uint32(len(matches)) > MaxUserSymbolsCount {
-		logrus.Warnf("%d symbols matched the provided pattern, only the first %d symbols will be traced.", len(matches), MaxUserSymbolsCount)
-		matches = matches[0:MaxUserSymbolsCount]
-	}
+	return nil
+}
 
-	if len(matches) == 0 {
-		return fmt.Errorf("no symbol in '%s' match the provided pattern '%s'", binary.Path, u.options.FuncPattern.String())
-	}
-
-	// relocate the function address with the base address of the binary
-	manager.SanitizeUprobeAddresses(binary.file, matches)
-
+func (u *UTrace) generateUProbe(sym SymbolInfo, pids []int) error {
 	// generate a probe for each traced PID, or a generic one that will match all pids
-	tracedPIDs := binary.Pids[:]
+	tracedPIDs := pids
 	if len(tracedPIDs) == 0 {
 		tracedPIDs = []int{0}
 	}
@@ -473,70 +526,67 @@ func (u *UTrace) generateUProbes(binary *TracedBinary) error {
 	var oneOfSelector manager.OneOf
 	var constantEditors []manager.ConstantEditor
 
-	// configure a probe for each symbol we're going to hook onto
-	for _, sym := range matches {
-		escapedName := sanitizeFuncName(sym.Name)
-		funcID := u.nextFuncID()
+	escapedName := sanitizeFuncName(sym.Name)
+	funcID := u.nextFuncID()
 
-		for _, pid := range tracedPIDs {
-			probeUID := RandomStringWithLen(10)
-			probe := &manager.Probe{
+	for _, pid := range tracedPIDs {
+		probeUID := RandomStringWithLen(10)
+		probe := &manager.Probe{
+			ProbeIdentificationPair: manager.ProbeIdentificationPair{
+				UID:          probeUID,
+				EBPFSection:  "uprobe/utrace",
+				EBPFFuncName: "uprobe_utrace",
+			},
+			CopyProgram:   true,
+			BinaryPath:    sym.BinaryPath,
+			UprobeOffset:  uint64(sym.FileOffset),
+			MatchFuncName: fmt.Sprintf(`^%s$`, escapedName),
+		}
+		u.manager.Probes = append(u.manager.Probes, probe)
+		oneOfSelector.Selectors = append(oneOfSelector.Selectors, &manager.ProbeSelector{
+			ProbeIdentificationPair: probe.ProbeIdentificationPair,
+		})
+		constantEditors = append(constantEditors, manager.ConstantEditor{
+			Name:  "func_id",
+			Value: uint64(funcID),
+			ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
+				probe.ProbeIdentificationPair,
+			},
+		})
+		if pid > 0 {
+			probe.PerfEventPID = pid
+		}
+
+		if u.options.Latency {
+			retProbe := &manager.Probe{
 				ProbeIdentificationPair: manager.ProbeIdentificationPair{
 					UID:          probeUID,
-					EBPFSection:  "uprobe/utrace",
-					EBPFFuncName: "uprobe_utrace",
+					EBPFSection:  "uretprobe/utrace",
+					EBPFFuncName: "uretprobe_utrace",
 				},
 				CopyProgram:   true,
-				BinaryPath:    binary.Path,
-				UprobeOffset:  sym.Value,
+				BinaryPath:    sym.BinaryPath,
+				UprobeOffset:  uint64(sym.FileOffset),
 				MatchFuncName: fmt.Sprintf(`^%s$`, escapedName),
 			}
-			u.manager.Probes = append(u.manager.Probes, probe)
+			u.manager.Probes = append(u.manager.Probes, retProbe)
 			oneOfSelector.Selectors = append(oneOfSelector.Selectors, &manager.ProbeSelector{
-				ProbeIdentificationPair: probe.ProbeIdentificationPair,
+				ProbeIdentificationPair: retProbe.ProbeIdentificationPair,
 			})
 			constantEditors = append(constantEditors, manager.ConstantEditor{
 				Name:  "func_id",
 				Value: uint64(funcID),
 				ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
-					probe.ProbeIdentificationPair,
+					retProbe.ProbeIdentificationPair,
 				},
 			})
 			if pid > 0 {
-				probe.PerfEventPID = pid
+				retProbe.PerfEventPID = pid
 			}
-
-			if u.options.Latency {
-				retProbe := &manager.Probe{
-					ProbeIdentificationPair: manager.ProbeIdentificationPair{
-						UID:          probeUID,
-						EBPFSection:  "uretprobe/utrace",
-						EBPFFuncName: "uretprobe_utrace",
-					},
-					CopyProgram:   true,
-					BinaryPath:    binary.Path,
-					UprobeOffset:  sym.Value,
-					MatchFuncName: fmt.Sprintf(`^%s$`, escapedName),
-				}
-				u.manager.Probes = append(u.manager.Probes, retProbe)
-				oneOfSelector.Selectors = append(oneOfSelector.Selectors, &manager.ProbeSelector{
-					ProbeIdentificationPair: retProbe.ProbeIdentificationPair,
-				})
-				constantEditors = append(constantEditors, manager.ConstantEditor{
-					Name:  "func_id",
-					Value: uint64(funcID),
-					ProbeIdentificationPairs: []manager.ProbeIdentificationPair{
-						retProbe.ProbeIdentificationPair,
-					},
-				})
-				if pid > 0 {
-					retProbe.PerfEventPID = pid
-				}
-			}
-
-			u.funcCache[funcID] = TracedSymbol{symbol: sym, binary: binary}
-			binary.symbolNameToFuncID[sym.Name] = funcID
 		}
+
+		u.funcCache[funcID] = TracedSymbol{symbol: sym.Symbol, binary: nil}
+		// binary.symbolNameToFuncID[sym.Name] = funcID
 	}
 
 	u.managerOptions.ActivatedProbes = append(u.managerOptions.ActivatedProbes, &oneOfSelector)
@@ -636,7 +686,7 @@ func (u *UTrace) generateKProbes() error {
 				probe.ProbeIdentificationPair,
 			},
 		})
-		if len(u.options.Binary) > 0 || len(u.options.PIDFilter) > 0 {
+		if len(u.options.Executables) > 0 || len(u.options.PIDFilter) > 0 {
 			constantEditors = append(constantEditors, manager.ConstantEditor{
 				Name:  "filter_user_binary",
 				Value: uint64(1),
@@ -667,7 +717,7 @@ func (u *UTrace) generateKProbes() error {
 					retProbe.ProbeIdentificationPair,
 				},
 			})
-			if len(u.options.Binary) > 0 || len(u.options.PIDFilter) > 0 {
+			if len(u.options.Executables) > 0 || len(u.options.PIDFilter) > 0 {
 				constantEditors = append(constantEditors, manager.ConstantEditor{
 					Name:  "filter_user_binary",
 					Value: uint64(1),
@@ -732,7 +782,7 @@ func (u *UTrace) generateTracepoints() error {
 				probe.ProbeIdentificationPair,
 			},
 		})
-		if len(u.options.Binary) > 0 || len(u.options.PIDFilter) > 0 {
+		if len(u.options.Executables) > 0 || len(u.options.PIDFilter) > 0 {
 			constantEditors = append(constantEditors, manager.ConstantEditor{
 				Name:  "filter_user_binary",
 				Value: uint64(1),
@@ -753,7 +803,7 @@ func (u *UTrace) generateTracepoints() error {
 	return nil
 }
 
-func (u *UTrace) generatePerfEvents(binary *TracedBinary) error {
+func (u *UTrace) generatePerfEvents(pids []int) error {
 	if err := u.parseKallsyms(); err != nil {
 		return errors.Wrap(err, "couldn't parse /proc/kallsyms")
 	}
@@ -764,10 +814,7 @@ func (u *UTrace) generatePerfEvents(binary *TracedBinary) error {
 	}
 
 	// generate a probe for each traced PID, or a generic one that will match all pids
-	var tracedPIDs []int
-	if binary != nil {
-		tracedPIDs = binary.Pids[:]
-	}
+	tracedPIDs := pids
 	if len(tracedPIDs) == 0 {
 		tracedPIDs = []int{0}
 	}
@@ -819,7 +866,7 @@ func (u *UTrace) generatePerfEvents(binary *TracedBinary) error {
 					probe.ProbeIdentificationPair,
 				},
 			})
-			if len(u.options.Binary) > 0 || len(u.options.PIDFilter) > 0 {
+			if len(u.options.Executables) > 0 || len(u.options.PIDFilter) > 0 {
 				if pid > 0 {
 					probe.PerfEventPID = pid
 				}
@@ -844,31 +891,120 @@ func (u *UTrace) generatePerfEvents(binary *TracedBinary) error {
 	return nil
 }
 
-// ResolveUserSymbolAndOffset returns the symbol of the function in which a given address lives, as well as the offset
-// inside that function
-func (u *UTrace) ResolveUserSymbolAndOffset(address SymbolAddr, binary *TracedBinary) StackTraceNode {
-	if binary != nil {
-		for symbolAddr, symbol := range binary.symbolsCache {
-			if address >= symbolAddr && address < symbolAddr+SymbolAddr(symbol.Size) {
-				funcID, ok := binary.symbolNameToFuncID[symbol.Name]
-				if !ok {
-					funcID = -1
-				}
-				return StackTraceNode{
-					Type:   User,
-					Symbol: symbol,
-					FuncID: funcID,
-					Offset: address - symbolAddr,
+func BuildProcMapRanges(pid int) (*ProcMapRanges, error) {
+	procMaps, err := ListProcMaps(pid)
+	if err != nil {
+		return nil, err
+	}
+	var procMapRanges ProcMapRanges
+	for _, m := range *procMaps {
+		procMapRanges = append(procMapRanges, ProcMapRange{	Start: uint64(m.StartAddr), 
+															End: uint64(m.EndAddr),
+															Offset: uint64(m.Offset),
+															BinaryPath: m.Path})
+	}
+	procMapRanges.Sort()
+	return &procMapRanges, nil
+}
+
+func LoadSymbols(binaryPath string) (*BinarySymbols, error) {
+	f, syms, err := manager.OpenAndListSymbols(binaryPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var symbols BinarySymbols
+	seenSymbols := make(map[string]bool)
+	for _, sym := range syms {
+		value := sym.Value
+		if len(sym.Version) > 0 || sym.Value == 0 {
+			continue
+		}
+
+		for _, prog := range f.Progs {
+			if prog.Type == elf.PT_LOAD {
+				if value >= prog.Vaddr && value < (prog.Vaddr+prog.Memsz) {
+					sym.Value = sym.Value - prog.Vaddr + prog.Off
 				}
 			}
 		}
+
+		if !seenSymbols[sym.Name] {
+			// a symbol might be present in both standard and dynamic symbols
+			symbols = append(symbols, sym)
+			seenSymbols[sym.Name] = true
+		}
+	}
+	symbols.Sort()
+	return &symbols, nil
+}
+
+func (u *UTrace) GetProcMapRange(address SymbolAddr, pid int) *ProcMapRange {
+	procMapRanges, ok := u.procMapsCache[pid]
+	if !ok {
+		procMapRanges, _ = BuildProcMapRanges(pid)
+		u.procMapsCache[pid] = procMapRanges
+	}
+	if procMapRanges == nil {
+		return nil
+	}	
+	return procMapRanges.Search(uint64(address))
+}
+
+func (u *UTrace) GetSymbols(procMapRange *ProcMapRange) *BinarySymbols {
+	if procMapRange.Symbols != nil {
+		return procMapRange.Symbols
 	}
 
+	symbols, ok := u.symbolCache[procMapRange.BinaryPath]
+	if ok {
+		procMapRange.Symbols = symbols
+		return symbols
+	}
+
+	symbols, _ = LoadSymbols(procMapRange.BinaryPath)
+	u.symbolCache[procMapRange.BinaryPath] = symbols
+	procMapRange.Symbols = symbols
+	return symbols
+}
+
+func UserSymbolNotFoundNode(address SymbolAddr) StackTraceNode {
 	return StackTraceNode{
 		Type:   User,
 		Symbol: SymbolNotFound,
 		FuncID: -1,
 		Offset: address,
+	}
+}
+
+// ResolveUserSymbolAndOffset returns the symbol of the function in which a given address lives, as well as the offset
+// inside that function
+func (u *UTrace) ResolveUserSymbolAndOffset(address SymbolAddr, pid int) StackTraceNode {
+	var symbol *elf.Symbol = nil
+	procMapRange := u.GetProcMapRange(address, pid)
+	if procMapRange == nil {
+		return UserSymbolNotFoundNode(address)
+	}
+	offset := uint64(address) - procMapRange.Start + procMapRange.Offset
+	symbols := u.GetSymbols(procMapRange)
+	if symbols == nil {
+		return UserSymbolNotFoundNode(address)
+	}
+	symbol = symbols.Search(offset)
+	if symbol == nil {
+		return UserSymbolNotFoundNode(address)		
+	}
+	
+	var funcID FuncID = 1
+	// funcID, ok := binary.symbolNameToFuncID[symbol.Name]
+	// if !ok {
+	// funcID = -1
+	// }
+	return StackTraceNode{
+		Type:   User,
+		Symbol: *symbol,
+		FuncID: funcID,
+		Offset: address - SymbolAddr(symbol.Value),
 	}
 }
 
@@ -952,7 +1088,7 @@ func (u *UTrace) TraceEventsHandler(Cpu int, data []byte, perfMap *manager.PerfM
 		if addr == 0 {
 			break
 		}
-		stackTrace.UserStacktrace = append(stackTrace.UserStacktrace, u.ResolveUserSymbolAndOffset(addr, binary))
+		stackTrace.UserStacktrace = append(stackTrace.UserStacktrace, u.ResolveUserSymbolAndOffset(addr, int(evt.Pid)))
 	}
 
 	// resolve kernel stack trace

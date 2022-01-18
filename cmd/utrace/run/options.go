@@ -21,6 +21,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 
@@ -83,8 +84,8 @@ func (uos *UTraceOptionsSanitizer) String() string {
 	switch uos.field {
 	case "pid":
 		return fmt.Sprintf("%v", uos.options.PIDFilter)
-	case "binary":
-		return fmt.Sprintf("%v", uos.options.Binary)
+	case "executable":
+		return fmt.Sprintf("%v", uos.options.Executables)
 	case "pattern":
 		return fmt.Sprintf("%v", uos.options.FuncPattern)
 	case "kernel-pattern":
@@ -105,7 +106,7 @@ func (uos *UTraceOptionsSanitizer) Set(val string) error {
 			return fmt.Errorf("%v is not a valid pid value: %v", val, err)
 		}
 		uos.options.PIDFilter = append(uos.options.PIDFilter, pid)
-	case "binary":
+	case "executable":
 		if len(val) == 0 {
 			return nil
 		}
@@ -116,16 +117,22 @@ func (uos *UTraceOptionsSanitizer) Set(val string) error {
 		if _, err := os.Stat(val); err != nil {
 			return fmt.Errorf("can't trace %s: %v", val, err)
 		}
-		uos.options.Binary = append(uos.options.Binary, val)
+		uos.options.Executables = append(uos.options.Executables, val)
 	case "pattern":
 		if len(val) == 0 {
 			return fmt.Errorf("empty pattern")
 		}
-		pattern, err := regexp.Compile(val)
+		fields := strings.SplitN(val, ":", 2)		
+		patternStr := fields[len(fields)-1]
+		pattern, err := regexp.Compile(patternStr)
 		if err != nil {
-			return fmt.Errorf("'%s' isn't a valid pattern: %v", val, err)
+			return fmt.Errorf("'%s' isn't a valid pattern: %v", patternStr, err)
 		}
-		uos.options.FuncPattern = pattern
+		binaryPath := ""
+		if len(fields) == 2 {
+			binaryPath = fields[0]
+		}
+		uos.options.FuncPattern = &utrace.FuncPattern{Pattern: pattern, Binary: binaryPath} 
 	case "kernel-pattern":
 		if len(val) == 0 {
 			return fmt.Errorf("empty kernel pattern")
@@ -153,7 +160,7 @@ func (uos *UTraceOptionsSanitizer) Type() string {
 	switch uos.field {
 	case "pid":
 		return "int array"
-	case "binary":
+	case "executable":
 		return "string array"
 	case "pattern", "kernel-pattern":
 		return "regexp"
